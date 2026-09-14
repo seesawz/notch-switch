@@ -44,14 +44,9 @@ struct GlassSurface: NSViewRepresentable {
 
     private func configure(_ nsView: NSView) {
         if #available(macOS 26.0, *), let glass = nsView as? NSGlassEffectView {
-            // `.regular` = 头文件里的 "Standard glass effect style"，用于常规 UI 表面；
-            // `.clear` = "Clear glass effect style"，用于内容/媒体优先的场合。
-            //
-            // 说明：系统设置里那个「透明 / 着色」开关**没有公开的读取 API**，
-            // 头文件只有 style / cornerRadius / tintColor / contentView 四个成员。
-            // 所以这里按 Apple 文档化的语义选 `.regular`（常规 UI 外壳），
-            // 而不是去猜用户的偏好 —— 系统的外观开关由系统负责渲染。
-            glass.style = .regular
+            // 取最透明的一档（`.clear`，见 GlassStylePolicy 的取舍说明）：
+            // 系统那个「透明 / 着色」开关没有公开读取 API，读不到就按最透明来。
+            glass.style = GlassStylePolicy.liquidStyle
             // 圆角交给 SwiftUI 的 clipShape：预览带是「上面两角方、下面两角圆」的不规则形状，
             // 而 cornerRadius 只能给统一圆角。
             glass.cornerRadius = 0
@@ -62,7 +57,10 @@ struct GlassSurface: NSViewRepresentable {
         }
 
         guard let effect = nsView as? NSVisualEffectView else { return }
-        effect.material = .hudWindow
+        // `.popover` = 「浮在其它内容之上的浮层」，是与本面板语义最接近、且比 `.hudWindow` 更透的材质。
+        // 注意：这条回退分支只在 macOS 26 以下生效，本机（26/27）走的是 Liquid Glass，
+        // **该材质在本机无法实测**，属未经真机验证的选择。
+        effect.material = .popover
         effect.blendingMode = .behindWindow   // ← 约束 1
         effect.state = .active                // ← 约束 2
         effect.isEmphasized = false

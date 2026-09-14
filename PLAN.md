@@ -5,7 +5,7 @@
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | v0.22（材质跟随系统设置） |
+| 文档版本 | v0.23（玻璃取最透明档） |
 | 最后更新 | 2026-09-14 |
 | 当前阶段 | M0~M3 已完成 · M4 部分完成（滚动已做，搜索待做） |
 | 目标平台 | macOS 14+（Apple Silicon 优先，Intel 尽力兼容） |
@@ -42,6 +42,7 @@
 | 2026-09-14 | v0.20 | **恢复 Liquid Glass 观感**：v0.19 的材质修复（ADR-029）修好了透视但把 `.glassEffect` 换成了经典毛玻璃，玻璃观感没了。改用 macOS 26 AppKit 原生 `NSGlassEffectView`（同时满足 behind-window 采样 + 真实 Liquid Glass），低版本仍回退 `NSVisualEffectView`。新增 `NotchSwitch.glassMaterial` 偏好开关用于 A/B（改完需重启）。新增 ADR-032 |
 | 2026-09-14 | v0.21 | **修复「卡片上半部分发白」**：根因是缩略图抓取时机 —— 面板在 level 1000，抓图时正盖在源窗口上方，抓出来的图里带着我们自己的面板。改为**只在面板不可见时抓**（启动 + 收起后 0.35s），展开时不再抓。同时保留了一套调试能力：`PanelCapture`（自截图，解决终端没有屏幕录制权限的问题）与原始缩略图导出。新增 ADR-033 |
 | 2026-09-14 | v0.22 | **材质改为跟随系统设置**（不再硬编码）：新增 `SystemDisplayOptions` 读取`NSWorkspace` 的辅助功能显示选项（减弱透明度 / 增强对比度 / 减弱动态效果 / 不依赖颜色），运行时监听变更无需重启；新增 `GlassMaterialPolicy` 纯函数决定材质（减弱透明度 → 不透明背景；macOS 26+ → Liquid Glass；更低 → 毛玻璃），单测 38 项。顺带记录一条边界：系统 Liquid Glass 的「透明/着色」开关无公开读取 API。新增 ADR-034 |
+| 2026-09-14 | v0.23 | **玻璃取最透明档**：新增 `GlassStylePolicy.liquidStyle = .clear`（系统 Liquid Glass 的透明/着色无公开读取 API，读不到就取最透明，见 ADR-035）；macOS 26 以下的回退材质 `.hudWindow` → `.popover`（该分支本机无法实测）。单测 38 → 39 项 |
 
 ---
 
@@ -483,8 +484,11 @@ struct WindowInfo: Identifiable {
 | macOS 26+ | `NSGlassEffectView` 原生 Liquid Glass（ADR-032） |
 | macOS 14/15 | `NSVisualEffectView(.behindWindow, .active)` 毛玻璃（ADR-029） |
 | 调试 `NotchSwitch.forceVibrancy=true` | 强制毛玻璃，用于 A/B 对照 |
+| 系统 Liquid Glass 的「透明 / 着色」 | **读不到就取最透明**：固定 `.clear`（ADR-035） |
 
-> 系统设置里 Liquid Glass 的「透明 / 着色」开关**没有公开读取 API**，按 `NSGlassEffectView.h` 的文档化语义选 `.regular`（常规 UI 表面），渲染交给系统。
+> 系统该项**没有公开读取 API**（`NSGlassEffectView.h` 只有 `style`/`cornerRadius`/`tintColor`/`contentView`）。
+> 代价：玻璃越透，直接压在面板上的单行标题在杂乱背景上越难读（缩略图本身不透明，不受影响）。
+> 若可读性变差，即为回退 `.regular` 的信号。
 
 - 品牌色：Kimi 蓝 `#4D6BFE` → 紫 `#8B5CF6` 渐变，**只做小面积点缀**（悬停描边、图标底、空态徽标），大面积一律中性玻璃
 - **描边跟随「增强对比度」**：正常 0.5pt / 10% 不透明度 → 开启后 1.5pt / 42%（Apple: "bolder lines"）
@@ -737,6 +741,7 @@ offset += (target - offset) × (1 − exp(−dt / τ))      τ = 0.035s
 | ADR-032 | macOS 26+ 的面板材质改用 AppKit 的 `NSGlassEffectView`；`NSVisualEffectView(behindWindow, .active)` 作为低版本回退；并提供 `NotchSwitch.glassMaterial` 偏好开关用于 A/B | ADR-029 修好了透视却丢了玻璃观感（退化成经典毛玻璃），用户立刻反馈「液态玻璃消失了」。三条约束必须同时成立：① 必须 behind-window 采样（SwiftUI 的 `Material` / `.glassEffect` 采样窗口内部，而我们窗内是空的）；② `NSVisualEffectView` 必须显式 `.state = .active`（Agent App 几乎永不活跃）；③ macOS 26+ 要 Liquid Glass 而不是普通毛玻璃。`.glassEffect` 满足不了 ①，而 AppKit 的 `NSGlassEffectView` 同时满足三条 —— 它既是原生 Liquid Glass，又按 behind-window 方式采样。视觉判断没法靠推断，故留运行时开关让用户一键对比 | 2026-09-14 |
 | ADR-033 | 缩略图**只在面板不可见时**抓取（启动时 + 每次收起后 0.35s），展开时不抓 | 面板窗口在 `level = .screenSaver`，展开时正盖在源窗口上方，ScreenCaptureKit 抓到的画面里会带上**我们自己的面板** —— 表现成「每张卡片上半部分一条整齐的浅色带」。这个 bug 靠肉眼无法定位到缩略图本身（看起来像是材质或叠加层的问题），是「导出原始缩略图 + 展开/收起两态像素级对照」才确认的：逐行像素差显示面板可见区正好是 y 33–181pt，布局完全正确，问题只能在图里。代价：面板展开期间新出现的窗口要等下次收起才有缩略图，先退化为应用图标 | 2026-09-14 |
 | ADR-034 | 玻璃材质、描边粗细、展开收起动画**一律读系统设置**，不写死数值；由 `SystemDisplayOptions` + `GlassMaterialPolicy` 统一决定 | 这些是用户在「系统设置」里明确表达过的偏好，macOS 通过公开 API 提供（`NSWorkspace (NSWorkspaceAccessibilityDisplay)`，macOS 10.10+），且 Apple 在头文件注释里直接写明了期望行为：① 减弱透明度 →「UI (mainly window) backgrounds should **not be semi-transparent**; they should be **opaque**」→ 面板背景必须变成不透明，不能再给玻璃；② 增强对比度 →「a less subtle color palette or **bolder lines**」→ 描边加粗、提高不透明度；③ 减弱动态效果 →「avoid **large animations**」→ 展开/收起不做动画；④ 不依赖颜色区分 →「should not convey information using **color alone**」→ 悬停态同时用加粗表达。之前硬编码 `style = .regular` + 固定描边是错的。**已知边界**：系统设置里那个 Liquid Glass「透明 / 着色」开关**没有公开读取 API**，`NSGlassEffectView.h` 只有 `style` / `cornerRadius` / `tintColor` / `contentView` 四个成员，故此处按文档化语义选 `.regular`（"Standard glass effect style"，用于常规 UI 表面），渲染由系统负责，不臆测用户偏好。决策抽成纯函数以便单测 | 2026-09-14 |
+| ADR-035 | Liquid Glass 的 `style` 固定取 `.clear`（最透明），不取 `.regular` | 系统设置里 Liquid Glass 的「透明 / 着色」开关**没有公开读取 API**（`NSGlassEffectView.h` 只有 `style`/`cornerRadius`/`tintColor`/`contentView`，无任何表示用户偏好的属性）。既然读不到，就按语义取最透明的一档：头文件里 `.clear` 是唯一带 "Clear glass effect style" 语义的。代价知情：玻璃越透，直接压在面板上的单行标题在杂乱背景上越难读（缩略图本身不透明，不受影响）；可读性变差即为回退 `.regular` 的信号。同时 macOS 26 以下的回退材质由 `.hudWindow` 改为 `.popover`（「浮在其它内容之上的浮层」语义更贴近本面板且更透），该分支**本机无法实测**，属未验证选择 | 2026-09-14 |
 
 
 ---

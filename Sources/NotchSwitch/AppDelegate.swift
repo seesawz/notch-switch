@@ -37,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 启动时读一次并留痕 —— 「为什么没有玻璃效果」的答案就在这行。
         display.start()
         Log.app.notice("系统显示选项: \(self.display.debugDescription, privacy: .public)")
+        if #available(macOS 26.0, *) {
+            Log.app.notice("玻璃样式: \(GlassStylePolicy.debugDescription, privacy: .public)")
+        }
 
         permissions.onAccessibilityGranted = { [weak self] in
             // 不抢焦点，只把引导窗口提到本 App 最前，让用户看到状态已更新

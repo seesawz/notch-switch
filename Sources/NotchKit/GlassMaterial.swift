@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// 面板背景最终采用的材质。
@@ -44,5 +45,36 @@ public enum GlassMaterialPolicy {
         if reduceTransparency { return .opaque }
         if blurOverride { return .vibrancy }
         return supportsLiquidGlass ? .liquidGlass : .vibrancy
+    }
+}
+
+/// Liquid Glass 的 `style` 选择。
+///
+/// **背景**：系统设置里 Liquid Glass 的「透明 / 着色」开关**没有公开读取 API**
+/// （`NSGlassEffectView.h` 只有 `style` / `cornerRadius` / `tintColor` / `contentView` 四个成员，
+/// 没有任何表示用户偏好的属性）。既然读不到，就固定取**语义上最透明**的那一档。
+///
+/// 依据（头文件原文）：
+/// ```
+/// /// Standard glass effect style.
+/// NSGlassEffectViewStyleRegular,
+/// /// Clear glass effect style.
+/// NSGlassEffectViewStyleClear
+/// ```
+/// `.clear` 是两档中唯一带 "Clear" 语义的，即最透明。
+///
+/// 代价（必须知情）：玻璃越透明，直接压在面板上的文字越难读。
+/// 我们面板里的主要内容是**缩略图**（本身不透明，不受影响）与单行标题；
+/// 若在杂乱背景上标题可读性变差，这就是回退到 `.regular` 的信号。
+@available(macOS 26.0, *)
+public enum GlassStylePolicy {
+    public static let liquidStyle: NSGlassEffectView.Style = .clear
+
+    public static var debugDescription: String {
+        switch liquidStyle {
+        case .clear: "Liquid Glass style = .clear（最透明）"
+        case .regular: "Liquid Glass style = .regular（标准）"
+        @unknown default: "Liquid Glass style = 未知(\(liquidStyle.rawValue))"
+        }
     }
 }

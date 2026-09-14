@@ -195,6 +195,17 @@ final class GlassMaterialPolicyTests: XCTestCase {
         )
     }
 
+    /// 系统 Liquid Glass 的「透明 / 着色」没有公开读取 API，读不到就固定取最透明的一档。
+    /// 钉住它，避免以后有人「顺手」改回 `.regular` 而没人知道为什么。
+    @available(macOS 26.0, *)
+    func testLiquidGlassUsesMostTransparentStyle() {
+        XCTAssertEqual(
+            GlassStylePolicy.liquidStyle,
+            .clear,
+            "读不到系统设置时按最透明来（ADR-035）"
+        )
+    }
+
     func testBlurOverrideBeatsLiquidGlass() {
         XCTAssertEqual(
             GlassMaterialPolicy.resolve(reduceTransparency: false, supportsLiquidGlass: true, blurOverride: true),
