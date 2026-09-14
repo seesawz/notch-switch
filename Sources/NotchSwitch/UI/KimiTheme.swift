@@ -16,6 +16,13 @@ enum Kimi {
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
+
+    /// 调试开关只读一次（`static let` 惰性初始化），避免每次重建视图都去读 UserDefaults：
+    /// ```
+    /// defaults write com.notchswitch.app NotchSwitch.debugGlassFill -bool true
+    /// ```
+    /// 开启后材质会变成半透明红色，用于在自截图里精确看出材质区域边界。
+    static let debugGlassFill = UserDefaults.standard.bool(forKey: "NotchSwitch.debugGlassFill")
 }
 
 extension View {
@@ -27,13 +34,18 @@ extension View {
     ///
     /// 想对比经典毛玻璃：
     /// ```
-    /// defaults write com.notchswitch.app glassMaterial blur   # 重启 App 生效
+    /// defaults write com.notchswitch.app NotchSwitch.glassMaterial blur   # 重启 App 生效
     /// ```
     @ViewBuilder
     func kimiGlass(in shape: some Shape, tint: Color? = nil) -> some View {
         background {
-            GlassSurface(tint: tint)
-                .clipShape(shape)
+            if Kimi.debugGlassFill {
+                // 调试：用实心半透明色替代材质，用于在自截图里精确看出材质区域边界
+                shape.fill(Color.red.opacity(0.55))
+            } else {
+                GlassSurface(tint: tint)
+                    .clipShape(shape)
+            }
         }
     }
 }

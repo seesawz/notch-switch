@@ -35,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // 窗口枚举是 AX 事件驱动 + 首次全量枚举，启动时跑一次
         windowList.start()
+        // 启动时面板是收起的 —— 正是抓缩略图的时机
+        refreshThumbnailsWhileHidden()
 
         let controller = NotchPanelController(
             rootView: AnyView(
@@ -71,12 +73,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // 被点的卡片会从鼠标底下跳走，下一张想点的位置也全变了
                 self.windowList.isOrderFrozen = true
                 self.windowList.refresh()
-                self.thumbnails.refresh(for: self.windowList.windows)
+                // 这里**故意不抓缩略图**：面板在 level 1000，此刻正盖在源窗口上方，
+                // 抓出来的图上半部分会是我们自己的面板（表现为「卡片上半发白」）。
+                // 缩略图统一在面板不可见时补（见 .collapsed 分支与启动时）。
             case .collapsed:
                 self.selection.reset()
                 // 收起后解除冻结并重排一次，下次展开就是最新的最近使用顺序
                 self.windowList.isOrderFrozen = false
                 self.windowList.scheduleRefresh()
+                self.refreshThumbnailsWhileHidden()
             }
         }
 
@@ -104,6 +109,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panelController?.stop()
         permissions.stop()
         windowList.stop()
+    }
+
+    /// 抓缩略图。**必须等面板不可见时再做**。
+    ///
+    /// 原因：面板窗口在 `level = .screenSaver`，抓图时它正盖在源窗口上方，
+    /// ScreenCaptureKit 抓到的画面里就带着我们自己的面板 ——
+    /// 表现成「每张卡片的上半部分都是一条整齐的浅色带」。
+    /// 这个 bug 靠肉眼几乎不可能定位到缩略图本身，是导出原始缩略图 + 像素级对照才确认的。
+    private func refreshThumbnailsWhileHidden() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.panelController?.isExpanded != true else { return }
+            self.thumbnails.refresh(for: self.windowList.windows)
+        }
     }
 
     /// 点击卡片：切窗口 + 收起面板

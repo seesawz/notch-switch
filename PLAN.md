@@ -5,7 +5,7 @@
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | v0.20（Liquid Glass 恢复） |
+| 文档版本 | v0.21（缩略图抓取时机） |
 | 最后更新 | 2026-09-14 |
 | 当前阶段 | M0~M3 已完成 · M4 部分完成（滚动已做，搜索待做） |
 | 目标平台 | macOS 14+（Apple Silicon 优先，Intel 尽力兼容） |
@@ -40,6 +40,7 @@
 | 2026-09-14 | v0.18 | **两个实测问题**：① **切换窗口后不再自动收起**，只有鼠标移开才收起——可以连着切好几个窗口；配套引入「展开期间冻结排序」（`WindowListModel.isOrderFrozen`），否则切换会改变 MRU、被点的卡片会从鼠标底下跳走。② **修复 Liquid Glass 透视失效**：根因是材质默认 `state = .followsWindowActiveState`，而本 App 是 Agent、点击也不激活自己，**几乎永远处于「不活跃」**，玻璃会一直渲染成平坦的非活跃外观；同时 `.glassEffect` 采样的是**窗口内**内容，而透明浮层窗内是空的。改用 `NSVisualEffectView(blendingMode: .behindWindow, state: .active)`。新增 ADR-029~031 |
 | 2026-09-14 | v0.19 | **整理文档**：ADR 表与变更日志改为严格升序、去重；给被后续决策修订/推翻的 ADR（009/021/026/028）加醒目标记并补阅读说明；修正 v0.15 的版本引用笔误；补 v0.12 跳号说明 |
 | 2026-09-14 | v0.20 | **恢复 Liquid Glass 观感**：v0.19 的材质修复（ADR-029）修好了透视但把 `.glassEffect` 换成了经典毛玻璃，玻璃观感没了。改用 macOS 26 AppKit 原生 `NSGlassEffectView`（同时满足 behind-window 采样 + 真实 Liquid Glass），低版本仍回退 `NSVisualEffectView`。新增 `NotchSwitch.glassMaterial` 偏好开关用于 A/B（改完需重启）。新增 ADR-032 |
+| 2026-09-14 | v0.21 | **修复「卡片上半部分发白」**：根因是缩略图抓取时机 —— 面板在 level 1000，抓图时正盖在源窗口上方，抓出来的图里带着我们自己的面板。改为**只在面板不可见时抓**（启动 + 收起后 0.35s），展开时不再抓。同时保留了一套调试能力：`PanelCapture`（自截图，解决终端没有屏幕录制权限的问题）与原始缩略图导出。新增 ADR-033 |
 
 ---
 
@@ -721,9 +722,48 @@ offset += (target - offset) × (1 − exp(−dt / τ))      τ = 0.035s
 | ADR-030 | **按住左键拖动窗口时抑制热区「进入」**：`HoverMonitor` 在 `inside && !isInside && 左键按下` 时判为未进入；只抑制进入、不抑制离开 | 拖窗口经过刘海是最常见的拖放路径，面板此时弹出既挡视线，面板若接住松手点击还会误触发切换。只挡「进入」保证已展开态下点卡片不受影响；松手后下一次 mouseMoved 自然补上进入判定，无需额外状态 |
 | ADR-031 | 切换窗口后**不自动收起**面板，只有鼠标移开才收起；展开期间**冻结列表排序**（`WindowListModel.isOrderFrozen`） | 用户会连续切好几个窗口比对内容，每切一次就收起等于逼他重新划回刘海。但切换会改变 MRU 顺序，列表若跟着重排，**被点的那张卡会从鼠标底下跳走**，下一张想点的位置也全变了；因此展开期间只更新窗口集合、保持原顺序，新窗口追加到末尾，收起后再解除冻结重排一次（与 §8 R8「展开期间冻结重排」一致） | 2026-09-14 |
 | ADR-032 | macOS 26+ 的面板材质改用 AppKit 的 `NSGlassEffectView`；`NSVisualEffectView(behindWindow, .active)` 作为低版本回退；并提供 `NotchSwitch.glassMaterial` 偏好开关用于 A/B | ADR-029 修好了透视却丢了玻璃观感（退化成经典毛玻璃），用户立刻反馈「液态玻璃消失了」。三条约束必须同时成立：① 必须 behind-window 采样（SwiftUI 的 `Material` / `.glassEffect` 采样窗口内部，而我们窗内是空的）；② `NSVisualEffectView` 必须显式 `.state = .active`（Agent App 几乎永不活跃）；③ macOS 26+ 要 Liquid Glass 而不是普通毛玻璃。`.glassEffect` 满足不了 ①，而 AppKit 的 `NSGlassEffectView` 同时满足三条 —— 它既是原生 Liquid Glass，又按 behind-window 方式采样。视觉判断没法靠推断，故留运行时开关让用户一键对比 | 2026-09-14 |
+| ADR-033 | 缩略图**只在面板不可见时**抓取（启动时 + 每次收起后 0.35s），展开时不抓 | 面板窗口在 `level = .screenSaver`，展开时正盖在源窗口上方，ScreenCaptureKit 抓到的画面里会带上**我们自己的面板** —— 表现成「每张卡片上半部分一条整齐的浅色带」。这个 bug 靠肉眼无法定位到缩略图本身（看起来像是材质或叠加层的问题），是「导出原始缩略图 + 展开/收起两态像素级对照」才确认的：逐行像素差显示面板可见区正好是 y 33–181pt，布局完全正确，问题只能在图里。代价：面板展开期间新出现的窗口要等下次收起才有缩略图，先退化为应用图标 | 2026-09-14 |
 
 
 ---
+
+### 14.9 视觉问题的排查手法（无需人工截图）
+
+UI 类问题靠「用户描述 + 猜」效率极低。本机已具备一套**可自动化**的视觉排查手段：
+
+```bash
+# 1. 开启面板自截图（App 自己有屏幕录制权限，终端没有）
+defaults write com.notchswitch.app NotchSwitch.capturePanelOnExpand -bool true
+
+# 2. 重启 App，然后把光标移到刘海触发展开
+./scripts/run-app.sh --install
+swift -e '' 2>/dev/null; echo 'import CoreGraphics
+CGWarpMouseCursorPosition(CGPoint(x: 864, y: 16))' | swift -
+
+# 3. 产物：展开态 / 收起态各一张（同一块屏幕区域，可直接对照）
+#    /tmp/notchswitch-expanded.png
+#    /tmp/notchswitch-collapsed.png
+```
+
+把光标移开即可拿到收起态那张。**两态对照 + 逐行像素差**能把「是我们的问题还是系统的样子」一刀切开 ——
+v0.21 那个缩略图 bug 就是靠它定位的：
+
+```
+差异区间: 行 66..361  =  屏幕 y 33.0..180.5 pt     # 正好是 topInset 33 + 内容 148 → 布局正确
+```
+
+另外还有两个开关：
+
+```bash
+# 导出原始缩略图，用来判断「卡片发白」是图本身的问题还是叠加层的
+defaults write com.notchswitch.app NotchSwitch.debugDumpThumbnail -bool true   # → /tmp/notchswitch-thumb.png
+
+# 材质替换成半透明红色，精确看出材质区域边界
+defaults write com.notchswitch.app NotchSwitch.debugGlassFill -bool true
+```
+
+> 注意：`defaults` 的键名必须带 `NotchSwitch.` 前缀，与代码里 `UserDefaults.standard` 读的键一致，
+> 否则会「设了但不生效」（踩过）。
 
 ## 10. 开放问题（待验证）
 

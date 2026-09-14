@@ -180,6 +180,16 @@ public final class NotchPanelController {
         metrics.setExpanded(true, transition: .expand)
         onStateChange?(state)
         Log.panel.notice("展开 → \(self.targetFrame(for: .expanded).debugString, privacy: .public)")
+
+        // 调试：等动画与缩略图稳定后把面板区域截下来（见 PanelCapture 说明）
+        if PanelCapture.isEnabled {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.state == .expanded else { return }
+                    PanelCapture.capturePanelRegion(panelFrame: self.targetFrame(for: .expanded), expanded: true)
+                }
+            }
+        }
     }
 
     /// - Parameter style: 收起档位。点击卡片后用 `.collapseAction`——
@@ -193,6 +203,16 @@ public final class NotchPanelController {
         metrics.setExpanded(false, transition: style)
         onStateChange?(state)
         Log.panel.notice("收起 → \(self.targetFrame(for: .collapsed).debugString, privacy: .public)")
+
+        // 调试对照：收起态截同一块区域，用来区分「是面板的问题」还是「系统本来的样子」
+        if PanelCapture.isEnabled {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.state == .collapsed else { return }
+                    PanelCapture.capturePanelRegion(panelFrame: self.targetFrame(for: .expanded), expanded: false)
+                }
+            }
+        }
     }
 
     /// 本 App 自己弹窗（设置 / 调试面板）时调用：临时降级，避免自己的窗口被自己挡住。

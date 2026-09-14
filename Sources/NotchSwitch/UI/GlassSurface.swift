@@ -13,8 +13,8 @@ enum GlassMaterialKind: String {
 
     /// 切换方式（改完需要重启 App，视图类型在创建时就定了）：
     /// ```
-    /// defaults write com.notchswitch.app glassMaterial blur   # 换成经典毛玻璃
-    /// defaults delete com.notchswitch.app glassMaterial       # 换回 Liquid Glass
+    /// defaults write com.notchswitch.app NotchSwitch.glassMaterial blur   # 经典毛玻璃
+    /// defaults delete com.notchswitch.app NotchSwitch.glassMaterial       # Liquid Glass
     /// ```
     static var preferred: GlassMaterialKind {
         guard let raw = UserDefaults.standard.string(forKey: "NotchSwitch.glassMaterial"),

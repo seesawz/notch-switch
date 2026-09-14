@@ -87,7 +87,20 @@ public final class ThumbnailStore: ObservableObject {
         configuration.showsCursor = false
 
         let filter = SCContentFilter(desktopIndependentWindow: window)
-        return try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+        let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+
+        // 调试：导出一张原始缩略图，用于判断卡片发白是图本身的问题还是叠加层的
+        if let image, PanelCapture.dumpsThumbnails {
+            PanelCapture.writePNG(image, to: "/tmp/notchswitch-thumb.png")
+            Log.panel.notice(
+                """
+                缩略图已导出: 窗口 \(window.windowID, privacy: .public) \
+                原始 \(Int(frame.width), privacy: .public)x\(Int(frame.height), privacy: .public) \
+                抓取 \(configuration.width, privacy: .public)x\(configuration.height, privacy: .public)
+                """
+            )
+        }
+        return image
     }
 
     // MARK: - 缓存
