@@ -118,7 +118,7 @@ Swift 6 + SwiftPM。核心逻辑与 UI 分离，`NotchKit` 可以单独跑测试
 
 ```bash
 swift build                     # 编译
-swift test                      # 31 项单元测试
+swift test                      # 34 项单元测试
 ./scripts/run-app.sh --install  # 构建 + 安装 + 启动
 xed .                           # 用 Xcode 打开（可断点调试）
 ```
