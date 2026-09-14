@@ -68,6 +68,8 @@ public final class NotchPanelController {
     private var collapseWorkItem: DispatchWorkItem?
     private var screenObserver: NSObjectProtocol?
     private var scrollMonitor: Any?
+    /// 监听面板 key 被系统转移（如点击卡片后目标 App 激活），展开中则夺回，维持液态玻璃
+    private var keyObserver: NSObjectProtocol?
 
     public init(rootView: AnyView, metrics: NotchMetrics = NotchMetrics()) {
         self.metrics = metrics
@@ -125,6 +127,8 @@ public final class NotchPanelController {
         layerGuard.onChange = { [weak self] blocker in self?.handleBlocker(blocker) }
         layerGuard.start()
 
+        installKeyHoldObserver()
+
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -141,13 +145,16 @@ public final class NotchPanelController {
             NotificationCenter.default.removeObserver(observer)
         }
         screenObserver = nil
+        if let observer = keyObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        keyObserver = nil
         if let monitor = scrollMonitor {
             NSEvent.removeMonitor(monitor)
         }
         scrollMonitor = nil
         panel.orderOut(nil)
     }
-
     /// 滚动监听（PLAN.md §6.5 / ADR-010）。
     ///
     /// 两条路径同时装，用**事件时间戳**去重，保证同一个事件只被处理一次：
@@ -199,6 +206,7 @@ public final class NotchPanelController {
         cancelPendingCollapse()
         state = .expanded
         panel.ignoresMouseEvents = false
+        holdKeyForLiquidGlass()
         let transition = effectiveTransition(.expand)
         applyFrame(for: .expanded, transition: transition)
         metrics.setExpanded(true, transition: transition)
@@ -223,6 +231,7 @@ public final class NotchPanelController {
         cancelPendingCollapse()
         state = .collapsed
         panel.ignoresMouseEvents = true
+        releaseKey()
         let transition = effectiveTransition(style)
         applyFrame(for: .collapsed, transition: transition)
         metrics.setExpanded(false, transition: transition)
@@ -244,6 +253,50 @@ public final class NotchPanelController {
     public func setOwnWindowPresented(_ presented: Bool) {
         ownWindowPresented = presented
         applyLevel()
+    }
+
+    // MARK: - key 与 Liquid Glass
+    //
+    // 实测结论（scripts/glass_probe.swift，截图 + 像素统计验证）：
+    // `NSGlassEffectView` 只在「自己的窗口是 key window」时才渲染液态玻璃；
+    // 非 key 时渲染成一块平坦的暗色贴片，背后内容完全透不过来。
+    // 覆写 `isKeyWindow` 对外说谎无效（玻璃读的是 WindowServer 的真实 key 状态）。
+    //
+    // 所以：面板展开期间必须真正持有 key，玻璃才能常亮。这样做是安全的：
+    // 面板是 `nonactivatingPanel`，成为 key **不会激活本 App**，前台 App 保持 active，
+    // 键盘输入仍路由给前台 App；key 身份只影响本 App 内部（正好只影响玻璃渲染）。
+
+    /// 展开时持有 key，点亮液态玻璃。
+    /// 自己弹窗（设置/调试）打开时不抢，避免夺走自家窗口的 key。
+    private func holdKeyForLiquidGlass() {
+        guard !ownWindowPresented else { return }
+        panel.makeKey()
+        Log.panel.debug("展开 → makeKey（点亮液态玻璃）key=\(self.panel.isKeyWindow, privacy: .public)")
+    }
+
+    /// 收起时交还 key。玻璃随 key 失效变平无所谓——面板已缩回刘海，本来就看不见。
+    private func releaseKey() {
+        guard panel.isKeyWindow else { return }
+        panel.resignKey()
+        Log.panel.debug("收起 → resignKey（交还键盘焦点）")
+    }
+
+    /// 面板展开期间 key 被系统转移（典型：点击卡片后目标 App 激活）→ 夺回，
+    /// 否则从点击那一刻起玻璃又变回平坦外观（正是「液态玻璃只有点击时闪现」的另一半成因）。
+    /// 刻意收起（state == .collapsed）时不夺回，避免和 releaseKey 打架。
+    private func installKeyHoldObserver() {
+        guard keyObserver == nil else { return }
+        keyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.state == .expanded, !self.ownWindowPresented else { return }
+                Log.panel.debug("key 被系统转移但面板仍展开 → 重新 makeKey 维持液态玻璃")
+                self.panel.makeKey()
+            }
+        }
     }
 
     // MARK: - 悬停联动

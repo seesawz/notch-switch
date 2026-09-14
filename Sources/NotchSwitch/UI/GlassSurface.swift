@@ -4,7 +4,7 @@ import SwiftUI
 
 /// 面板背景：**采样窗口背后内容**的玻璃。
 ///
-/// 三个约束必须同时成立，少一个就会出现「透视不对」或「玻璃消失」：
+/// 四个约束必须同时成立，少一个就会出现「透视不对」或「玻璃消失」：
 ///
 /// 1. **必须走 AppKit 的 behind-window 路线。**
 ///    SwiftUI 的 `.ultraThinMaterial` / `.glassEffect` 采样的是**窗口内部**内容，
@@ -16,6 +16,14 @@ import SwiftUI
 ///
 /// 3. **macOS 26+ 要用 Liquid Glass。**
 ///    `.glassEffect` 那条路满足不了第 1 条，所以改用 AppKit 的 `NSGlassEffectView`。
+///
+/// 4. **面板必须是 key window，玻璃才渲染（ADR-037）。**
+///    实测（`scripts/glass_probe.swift`）：`NSGlassEffectView` 在窗口非 key 时
+///    渲染成平坦暗色贴片，背后内容完全不折射 —— 表现为「只有点击卡片时玻璃才闪现」
+///    （mouse-down 瞬间面板短暂成为 key，激活目标 App 后又被夺走）。
+///    覆写 `isKeyWindow` 对外说谎无效，必须真正持有 key。
+///    由 `NotchPanelController` 的 `holdKeyForLiquidGlass()` / `releaseKey()` 负责，
+///    本视图无法自行控制（`NSGlassEffectView` 没有 `state` 属性可设）。
 ///
 /// 材质种类**不由这里决定** —— 它来自 `GlassMaterialPolicy`（读系统设置 + 系统版本）。
 /// 本视图只负责把已经决定好的材质渲染出来。
