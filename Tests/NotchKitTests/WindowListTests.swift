@@ -65,7 +65,7 @@ final class MRUOrderTests: XCTestCase {
     }
 }
 
-/// 滚动的逐帧跟随与吸附（PLAN.md §6.5）。
+/// 滚动的逐帧跟随（PLAN.md §6.5）。
 ///
 /// 这段数学决定「丝滑」与否：整数步进是瞬移，指数逼近才有惯性收尾。
 final class ScrollFollowTests: XCTestCase {
@@ -94,6 +94,17 @@ final class ScrollFollowTests: XCTestCase {
         XCTAssertGreaterThan(frames, 1, "必须是多帧逼近，而不是一帧跳到（否则就是瞬移）")
     }
 
+    /// 停在半张卡中间也**不能**被拉回边界——松手瞬间再拽一下会破坏跟手感
+    func testOffsetStaysWhereItLandsWithoutSnapping() {
+        var follow = ScrollFollow()
+        let midway: CGFloat = 188 * 2 + 60
+        follow.addInput(midway, maxOffset: 2000)
+        while follow.advance() {}
+
+        XCTAssertEqual(follow.offset, midway, accuracy: 0.001)
+        XCTAssertEqual(follow.target, midway, accuracy: 0.001)
+    }
+
     func testOffsetApproachesTargetMonotonically() {
         var follow = ScrollFollow()
         follow.addInput(188, maxOffset: 1000)
@@ -106,40 +117,17 @@ final class ScrollFollowTests: XCTestCase {
         }
     }
 
-    func testSnapRoundsToNearestCardBoundary() {
+    func testAnchorIndexRoundsToNearestCard() {
         var follow = ScrollFollow()
         follow.addInput(188 * 2 + 60, maxOffset: 2000)   // 停在 2.3 张的位置
         while follow.advance() {}
 
-        let didSnap = follow.snap(to: 188, maxOffset: 2000)
-
-        XCTAssertTrue(didSnap)
-        XCTAssertEqual(follow.target, 188 * 2, "应吸附到最近的第 2 张边界")
+        XCTAssertEqual(follow.anchorIndex(stride: 188), 2, "2.3 张应算作第 2 张可见")
     }
 
-    func testSnapDoesNothingWhenAlreadyAligned() {
-        var follow = ScrollFollow()
-        follow.addInput(188, maxOffset: 2000)
-        while follow.advance() {}
-
-        XCTAssertFalse(follow.snap(to: 188, maxOffset: 2000))
-    }
-
-    func testSnapRespectsMaximumOffset() {
-        var follow = ScrollFollow()
-        follow.addInput(1000, maxOffset: 188 * 3)
-        while follow.advance() {}
-
-        _ = follow.snap(to: 188, maxOffset: 188 * 3)
-        XCTAssertEqual(follow.target, 188 * 3, "吸附不能越过末尾")
-    }
-
-    func testAnchorIndex() {
-        var follow = ScrollFollow()
-        follow.addInput(188 * 2, maxOffset: 2000)
-        while follow.advance() {}
-
-        XCTAssertEqual(follow.anchorIndex(stride: 188), 2)
+    func testAnchorIndexHandlesZeroStride() {
+        let follow = ScrollFollow()
+        XCTAssertEqual(follow.anchorIndex(stride: 0), 0, "不能除零")
     }
 }
 
@@ -199,6 +187,26 @@ final class ScrollDeltaTests: XCTestCase {
         XCTAssertEqual(ScrollDelta.contentOffset(for: 0, hasPreciseDeltas: false), 0)
         XCTAssertEqual(ScrollDelta.contentOffset(for: 0, hasPreciseDeltas: true), 0)
     }
+
+    /// 方向语义（ADR-024）：NSEvent 约定「+ = 回退」，预览带取反后
+    /// 「下滚 / 左滑 = 前进（露出后面的卡片）」。系统已按「自然滚动」设置
+    /// 翻转过符号，所以取反即自动跟随系统设置。
+    func testStripOffsetInvertsNSEventSign() {
+        // 机械滚轮向下滚一格 = deltaY -1 行 → 预览带前进（正位移）
+        XCTAssertEqual(
+            ScrollDelta.stripOffset(deltaX: 0, deltaY: -1, hasPreciseDeltas: false),
+            ScrollDelta.pointsPerLine,
+            accuracy: 0.001
+        )
+        // 触控板双指上滑（自然滚动下 = 内容上移 = 前进）→ 正位移，且 1:1
+        XCTAssertEqual(ScrollDelta.stripOffset(deltaX: 0, deltaY: -10, hasPreciseDeltas: true), 10, accuracy: 0.001)
+        // 双指左滑（露出右边 = 前进）= 水平负 delta → 正位移
+        XCTAssertEqual(ScrollDelta.stripOffset(deltaX: -120, deltaY: 0, hasPreciseDeltas: true), 120, accuracy: 0.001)
+        // 反向：上滚 / 右滑 → 负位移
+        XCTAssertEqual(ScrollDelta.stripOffset(deltaX: 0, deltaY: 5, hasPreciseDeltas: true), -5, accuracy: 0.001)
+        // 全零不动
+        XCTAssertEqual(ScrollDelta.stripOffset(deltaX: 0, deltaY: 0, hasPreciseDeltas: true), 0)
+    }
 }
 
 /// 可视区滚动（PLAN.md §6.5）
@@ -206,9 +214,7 @@ final class ScrollDeltaTests: XCTestCase {
 final class PanelSelectionTests: XCTestCase {
 
     private func makeSelection() -> PanelSelection {
-        let selection = PanelSelection(visibleCount: 4, cardStride: 188)
-        selection.settleDelay = 0   // 测试里同步收敛，不等真实时间
-        return selection
+        PanelSelection(visibleCount: 4, cardStride: 188)
     }
 
     func testNoOverflowMeansNoMovement() {
@@ -219,13 +225,15 @@ final class PanelSelectionTests: XCTestCase {
         XCTAssertEqual(selection.offset, 0)
     }
 
-    func testScrollMovesAndSnapsToCardBoundary() {
+    /// 不做吸附：滚到哪里就停在哪里，允许停在半张卡中间
+    func testScrollStopsExactlyWhereItLands() {
         let selection = makeSelection()
-        selection.scroll(by: 188 * 2 + 60, totalCount: 10)
+        let midway: CGFloat = 188 * 2 + 60
+        selection.scroll(by: midway, totalCount: 10)
         selection.settleImmediately()
 
-        XCTAssertEqual(selection.offset, 188 * 2, accuracy: 0.01, "松手后应对齐到第 2 张")
-        XCTAssertEqual(selection.firstVisibleIndex, 2)
+        XCTAssertEqual(selection.offset, midway, accuracy: 0.01, "不能被吸附拉回卡片边界")
+        XCTAssertEqual(selection.firstVisibleIndex, 2, "2.3 张处可见区从第 2 张开始")
         XCTAssertEqual(selection.visibleRange, 2..<6)
     }
 

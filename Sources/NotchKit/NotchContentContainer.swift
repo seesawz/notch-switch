@@ -70,11 +70,9 @@ public final class NotchContentContainer: NSView {
         // 与另一条事件路径（local monitor / 响应者链）去重
         guard timestamp != lastHandledEventTimestamp else { return true }
 
-        // 不再要求按住 Shift：普通滚轮、双指上下滑、双指左右滑、Shift+滚轮 都能翻卡
-        let raw = ScrollDelta.dominant(deltaX: deltaX, deltaY: deltaY)
-        guard raw != 0 else { return false }
-
-        let contentOffset = ScrollDelta.contentOffset(for: raw, hasPreciseDeltas: hasPreciseDeltas)
+        // 不再要求按住 Shift：普通滚轮、双指上下滑、双指左右滑、Shift+滚轮 都能翻卡。
+        // stripOffset = 主导轴取值 + 量纲换算 + 方向取反（跟随系统滚动方向，ADR-024）
+        let contentOffset = ScrollDelta.stripOffset(deltaX: deltaX, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas)
         guard contentOffset != 0 else { return false }
 
         // 只有真的产生了滚动才消费事件；没有可滚动内容时让它继续传递

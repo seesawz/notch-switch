@@ -1,10 +1,10 @@
 import NotchKit
 import SwiftUI
 
-/// 刘海面板的内容：横向窗口预览条。
+/// 刘海面板的内容：横向窗口预览条（Kimi 风格 + Liquid Glass）。
 ///
-/// 可视区固定 4 张（PLAN.md §6.1），窗口多于 4 个时用 Shift + 滚轮逐张滚动（§6.5）。
-/// M4 待补：大预览浮层、键入搜索、应用筛选条。
+/// 可视区固定 4 张（PLAN.md §6.1），窗口多于 4 个时直接滚轮逐张滚动（§6.5）。
+/// 材质统一走 `kimiGlass`（macOS 26+ Liquid Glass，低版本回退毛玻璃，见 KimiTheme）。
 struct NotchRootView: View {
 
     @ObservedObject var permissions: PermissionsModel
@@ -21,6 +21,20 @@ struct NotchRootView: View {
     private let horizontalPadding: CGFloat = 16
     /// = 卡片 132 + 上下内边距 16（已移除 footer，见 §6.1）
     private let contentHeight: CGFloat = 148
+
+    /// 预览带外形：顶部与刘海齐平，只有下面两角有圆角
+    private let stripShape = UnevenRoundedRectangle(
+        topLeadingRadius: 0,
+        bottomLeadingRadius: 20,
+        bottomTrailingRadius: 20,
+        topTrailingRadius: 0,
+        style: .continuous
+    )
+
+    private let cardImageShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+
+    /// 悬停中的卡片（纯视觉反馈，不参与选中状态机）
+    @State private var hoveredID: CGWindowID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,25 +69,9 @@ struct NotchRootView: View {
         }
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: 18,
-                bottomTrailingRadius: 18,
-                topTrailingRadius: 0,
-                style: .continuous
-            )
-            .fill(.ultraThinMaterial)
-            .overlay {
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 0,
-                    bottomLeadingRadius: 18,
-                    bottomTrailingRadius: 18,
-                    topTrailingRadius: 0,
-                    style: .continuous
-                )
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-            }
+        .kimiGlass(in: stripShape)
+        .overlay {
+            stripShape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
         }
     }
 
@@ -94,42 +92,60 @@ struct NotchRootView: View {
     }
 
     private func card(for window: WindowInfo) -> some View {
-        Button {
+        let hovered = hoveredID == window.id
+        return Button {
             onActivate(window)
         } label: {
             VStack(spacing: 6) {
-                thumbnail(for: window)
+                thumbnail(for: window, hovered: hovered)
                 titleRow(for: window)
             }
             .frame(width: cardWidth)
+            .scaleEffect(hovered ? 1.03 : 1)
+            .shadow(color: .black.opacity(hovered ? 0.22 : 0), radius: 10, y: 3)
+            .animation(.spring(response: 0.24, dampingFraction: 0.75), value: hovered)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering {
+                hoveredID = window.id
+            } else if hoveredID == window.id {
+                hoveredID = nil
+            }
+        }
         .help("\(window.appName) — \(window.displayTitle)")
     }
 
     @ViewBuilder
-    private func thumbnail(for window: WindowInfo) -> some View {
+    private func thumbnail(for window: WindowInfo, hovered: Bool) -> some View {
         ZStack {
             if let image = thumbnails.images[window.id] {
                 Image(decorative: image, scale: 2)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: cardWidth, height: cardImageHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(cardImageShape)
             } else {
                 fallbackThumbnail(for: window)
             }
         }
         .frame(width: cardWidth, height: cardImageHeight)
         .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
+            cardImageShape.strokeBorder(
+                hovered ? Kimi.accent.opacity(0.85) : Color.primary.opacity(0.12),
+                lineWidth: hovered ? 1.5 : 0.5
+            )
         }
         .overlay(alignment: .bottomLeading) {
             if let icon = window.appIcon {
                 Image(nsImage: icon)
                     .resizable()
-                    .frame(width: 16, height: 16)
+                    .frame(width: 14, height: 14)
+                    .padding(5)
+                    .background(
+                        .ultraThinMaterial,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
                     .padding(6)
             }
         }
@@ -146,8 +162,11 @@ struct NotchRootView: View {
     /// 没有缩略图时的降级显示（最小化窗口 / 尚未抓到 / 无屏幕录制权限）
     private func fallbackThumbnail(for window: WindowInfo) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.primary.opacity(0.07))
+            cardImageShape.fill(.linearGradient(
+                colors: [Color.primary.opacity(0.08), Color.primary.opacity(0.03)],
+                startPoint: .top,
+                endPoint: .bottom
+            ))
 
             if let icon = window.appIcon {
                 Image(nsImage: icon)
@@ -184,10 +203,18 @@ struct NotchRootView: View {
     // MARK: - 空态与状态栏
 
     private var emptyState: some View {
-        VStack(spacing: 6) {
-            Image(systemName: permissions.accessibilityGranted ? "macwindow.badge.plus" : "lock.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(.tertiary)
+        VStack(spacing: 8) {
+            ZStack {
+                Circle().fill(permissions.accessibilityGranted
+                    ? AnyShapeStyle(Color.primary.opacity(0.06))
+                    : AnyShapeStyle(Kimi.accentGradient))
+
+                Image(systemName: permissions.accessibilityGranted ? "macwindow.badge.plus" : "lock.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(permissions.accessibilityGranted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.white))
+            }
+            .frame(width: 38, height: 38)
+
             Text(emptyHint)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)

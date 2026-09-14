@@ -37,6 +37,7 @@ struct DebugPanelView: View {
             .padding(.vertical, 8)
         }
         .frame(minWidth: 620, minHeight: 460)
+        .tint(Kimi.accent)
         .onAppear { text = textProvider() }
         .onReceive(ticker) { _ in text = textProvider() }
     }

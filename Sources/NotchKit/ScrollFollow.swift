@@ -1,13 +1,14 @@
 import CoreGraphics
 import Foundation
 
-/// 滚动的「跟随 + 吸附」数学，纯值类型，可单测。
+/// 滚动的跟随数学，纯值类型，可单测。
 ///
 /// 为什么需要它：
 /// 直接改索引（第 1 张 → 第 2 张）在视觉上是**瞬移**，无论帧率多高都是「跳」。
-/// 要做到丝滑，需要：
-///  1. `offset` 每帧向 `target` 指数逼近 —— 输入停下的瞬间仍有惯性收尾，不是硬停
-///  2. 松手后吸附到最近的卡片边界 —— 保证最终停位整齐，而不是卡在半张卡中间
+/// `offset` 每帧向 `target` 指数逼近，输入停下的瞬间仍有惯性收尾，而不是硬停。
+///
+/// 注意：**不做吸附**。滚到哪里就停在哪里，可以停在半张卡中间——
+/// 强制对齐到卡片边界会在松手瞬间把内容再拽一下，反而破坏跟手感。
 public struct ScrollFollow {
 
     /// 当前渲染偏移（点）
@@ -51,19 +52,9 @@ public struct ScrollFollow {
         return true
     }
 
-    /// 吸附到最近的卡片边界。
-    /// - Returns: 是否产生了新的目标位置（true 表示还要继续动）
-    public mutating func snap(to stride: CGFloat, maxOffset: CGFloat) -> Bool {
-        guard stride > 0 else { return false }
-        let snapped = min(max(0, (offset / stride).rounded() * stride), maxOffset)
-        guard abs(snapped - offset) > settleEpsilon else { return false }
-        target = snapped
-        return true
-    }
-
     public var isSettled: Bool { abs(target - offset) < settleEpsilon }
 
-    /// 当前对齐到的卡片索引
+    /// 当前最接近的卡片索引（仅用于计算「可见区从第几张开始」，不会真的移动内容）
     public func anchorIndex(stride: CGFloat) -> Int {
         guard stride > 0 else { return 0 }
         return Int((offset / stride).rounded())

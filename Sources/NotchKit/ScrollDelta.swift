@@ -39,4 +39,14 @@ public enum ScrollDelta {
         let points = delta * pointsPerLine
         return max(-maxWheelStep, min(maxWheelStep, points))
     }
+
+    /// 预览带的内容位移：主导轴换算 + 方向翻转（ADR-024）。
+    ///
+    /// NSEvent 的滚动 delta 遵循「**+ = 回退**」的约定（垂直 + = 向上滚 = 露出更早的内容，
+    /// 水平 + = 向左滑同理）。预览带要的是「向下滚 / 向左滑 = 前进（露出后面的卡片）」，
+    /// 所以整体取反。系统已按用户的「自然滚动」设置翻转过 delta 符号，
+    /// 取反之后方向就**自动跟随系统设置**，不需要自己读偏好。
+    public static func stripOffset(deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool) -> CGFloat {
+        -contentOffset(for: dominant(deltaX: deltaX, deltaY: deltaY), hasPreciseDeltas: hasPreciseDeltas)
+    }
 }

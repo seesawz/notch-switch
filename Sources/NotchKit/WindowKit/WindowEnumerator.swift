@@ -53,9 +53,11 @@ public enum WindowEnumerator {
         pid: pid_t,
         snapshots: [CGWindowSnapshot]
     ) -> WindowInfo? {
-        // 只保留标准窗口，排除浮动面板、弹出层等
-        let subrole = axWindow.string(kAXSubroleAttribute as String)
-        if let subrole, subrole != (kAXStandardWindowSubrole as String) {
+        // 只保留标准窗口，排除浮动面板、弹出层等。
+        // subrole 必须严格等于 AXStandardWindow：**为 nil 的也要挡**——
+        // 实测访达会多报一个全屏桌面元素（subrole=nil、frame 盖住整个桌面），
+        // 不挡就会多出一张卡片（2026-09-14 实测复现）。
+        guard axWindow.string(kAXSubroleAttribute as String) == (kAXStandardWindowSubrole as String) else {
             return nil
         }
 

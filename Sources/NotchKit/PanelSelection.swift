@@ -19,15 +19,11 @@ public final class PanelSelection: ObservableObject {
 
     private var follow = ScrollFollow()
     private var ticker: Timer?
-    private var lastInputAt: CFTimeInterval = 0
-    private var needsSnap = false
     private var totalCount = 0
 
     /// 驱动帧的定时器间隔。取 120Hz：ProMotion 上是帧对齐的，普通屏上多出来的几次
     /// tick 只是空转（每次仅做几次浮点运算），代价可以忽略。
     private let tickInterval: TimeInterval = 1.0 / 120.0
-    /// 停止输入多久后开始吸附。测试里会设为 0 以便同步收敛。
-    public var settleDelay: TimeInterval = 0.12
 
     private var lastTickAt: CFTimeInterval = 0
 
@@ -65,8 +61,6 @@ public final class PanelSelection: ObservableObject {
     public func scroll(by delta: CGFloat, totalCount: Int) {
         self.totalCount = totalCount
         follow.addInput(delta, maxOffset: maxOffset)
-        lastInputAt = CACurrentMediaTime()
-        needsSnap = true
         startTicking()
     }
 
@@ -77,7 +71,6 @@ public final class PanelSelection: ObservableObject {
 
     public func reset() {
         follow.reset()
-        needsSnap = false
         offset = 0
         stopTicking()
     }
@@ -109,13 +102,8 @@ public final class PanelSelection: ObservableObject {
 
     /// 单帧推进（可指定 dt，供测试同步收敛）
     func tick(deltaTime: TimeInterval) {
-        var isMoving = follow.advance(deltaTime: deltaTime)
-
-        // 已经追上目标、且输入停了足够久 → 吸附到最近的卡片边界
-        if !isMoving, needsSnap, CACurrentMediaTime() - lastInputAt > settleDelay {
-            needsSnap = false
-            isMoving = follow.snap(to: cardStride, maxOffset: maxOffset)
-        }
+        // 没有任何吸附：追上目标就停在哪，可以停在半张卡中间
+        let isMoving = follow.advance(deltaTime: deltaTime)
 
         if offset != follow.offset { offset = follow.offset }
         if !isMoving { stopTicking() }
