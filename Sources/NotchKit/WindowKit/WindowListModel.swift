@@ -20,6 +20,14 @@ public final class WindowListModel: ObservableObject {
     private var isStarted = false
     private var hasLoggedFirstRefresh = false
 
+    /// 展开期间冻结显示顺序（PLAN.md R8）。
+    ///
+    /// 现在切换窗口后面板**不会**自动收起，用户可以连续切好几个。
+    /// 而切换会改变 MRU 顺序，如果列表跟着重排，被点的那张卡会从鼠标底下跳走，
+    /// 下一张想点的位置也全变了。所以展开期间只更新窗口**集合**，不动顺序；
+    /// 收起后解除冻结并重排一次。
+    public var isOrderFrozen = false
+
     /// AX 事件突发时的合并窗口（PLAN.md §4.3 的 200ms 节流）
     private let throttleInterval: TimeInterval = 0.2
 
@@ -68,7 +76,11 @@ public final class WindowListModel: ObservableObject {
         // 新出现的窗口按 CGWindowList 的前后顺序并入队尾
         mru.seedUnknown(ids)
 
-        windows = mru.sorted(enumerated, id: \.id)
+        if isOrderFrozen {
+            windows = frozenOrder(preserving: windows.map(\.id), from: enumerated)
+        } else {
+            windows = mru.sorted(enumerated, id: \.id)
+        }
         observerPool.sync(with: Set(enumerated.map(\.pid)))
         lastRefresh = Date()
         diagnostics = "\(enumerated.count) 个窗口 / \(Set(enumerated.map(\.pid)).count) 个应用 / 订阅 \(observerPool.observedProcessCount) 个应用"
@@ -86,6 +98,16 @@ public final class WindowListModel: ObservableObject {
         } else {
             Log.panel.debug("窗口列表刷新: \(self.diagnostics, privacy: .public)")
         }
+    }
+
+    /// 冻结期间的排序：原有窗口保持原位（只剔除已关闭的），新出现的追加到末尾。
+    private func frozenOrder(preserving previousOrder: [CGWindowID], from enumerated: [WindowInfo]) -> [WindowInfo] {
+        let byID = Dictionary(enumerated.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let previousSet = Set(previousOrder)
+
+        let kept = previousOrder.compactMap { byID[$0] }
+        let added = enumerated.filter { !previousSet.contains($0.id) }
+        return kept + added
     }
 
     /// 事件驱动的节流刷新：突发 AX 事件合并成一次枚举，避免列表抖动

@@ -85,6 +85,11 @@ struct NotchRootView: View {
         }
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 灵动岛式收起：内容在收起开始的**一帧内**消失，只留空玻璃胶囊缩回刘海。
+        // 预览图跟着面板一起缩会在亮色窗口上闪白（实测），所以内容不参与收起动画；
+        // 外层的淡出+缩放只作用于玻璃胶囊本身。
+        .opacity(metrics.isExpanded ? 1 : 0)
+        .animation(metrics.isExpanded ? contentAnimation : .linear(duration: 0), value: metrics.isExpanded)
         .kimiGlass(in: stripShape)
         .overlay {
             stripShape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)

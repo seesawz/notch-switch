@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Kimi 风格设计令牌。
@@ -18,15 +19,26 @@ enum Kimi {
 }
 
 extension View {
-    /// Liquid Glass 材质：macOS 26+ 用 `.glassEffect`，更低版本回退 `.ultraThinMaterial`。
+    /// 面板材质：采样**窗口背后**的毛玻璃。
     ///
-    /// 全项目唯一的材质分支入口——「26 玻璃 / 低版本模糊」的差异只写在这里（ADR-023）。
+    /// 全项目唯一的材质入口（ADR-029）。**不要换成 `.ultraThinMaterial` 或 `.glassEffect`**：
+    /// 那两者采样的是窗口内部的内容，而本面板是透明浮层、窗内是空的，
+    /// 换过去会立刻丢掉透视效果（表现为一片平坦的半透明灰）。
     @ViewBuilder
-    func kimiGlass(in shape: some Shape, tint: Color? = nil) -> some View {
-        if #available(macOS 26.0, *) {
-            glassEffect(tint.map { .regular.tint($0) } ?? .regular, in: shape)
-        } else {
-            background { shape.fill(.ultraThinMaterial) }
+    func kimiGlass(
+        in shape: some Shape,
+        material: NSVisualEffectView.Material = .hudWindow,
+        tint: Color? = nil
+    ) -> some View {
+        background {
+            BehindWindowMaterial(material: material)
+                .clipShape(shape)
+                .overlay {
+                    // 极淡的品牌着色，避免纯灰
+                    if let tint {
+                        shape.fill(tint.opacity(0.10))
+                    }
+                }
         }
     }
 }

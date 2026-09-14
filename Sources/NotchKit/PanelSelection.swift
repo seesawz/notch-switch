@@ -80,9 +80,16 @@ public final class PanelSelection: ObservableObject {
         stopTicking()
     }
 
-    /// 标记某张卡被点击（切换前的确认高亮）
+    /// 标记某张卡被点击（切换后的确认高亮）
     public func markActivating(_ windowID: CGWindowID) {
         activatingWindowID = windowID
+    }
+
+    /// 清除确认高亮。只有当前高亮的仍是这张卡时才清，
+    /// 避免「连点两张卡时前一张的定时器把后一张的高亮清掉」。
+    public func clearActivating(_ windowID: CGWindowID) {
+        guard activatingWindowID == windowID else { return }
+        activatingWindowID = nil
     }
 
     // MARK: - 帧驱动

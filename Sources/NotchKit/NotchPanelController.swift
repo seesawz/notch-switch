@@ -159,8 +159,10 @@ public final class NotchPanelController {
 
     // MARK: - 手动控制（菜单栏用）
 
+    /// 菜单栏的「展开 / 收起」。收起用 `.collapseAction`：
+    /// 这是用户明确下达的指令，要迅速让开，不该用鼠标移开那种较慢的节奏。
     public func toggle() {
-        state == .expanded ? collapse() : expand()
+        state == .expanded ? collapse(style: .collapseAction) : expand()
     }
 
     public func expand() {
@@ -182,30 +184,6 @@ public final class NotchPanelController {
 
     /// - Parameter style: 收起档位。点击卡片后用 `.collapseAction`——
     ///   用户已经做完决定了，面板要更快更干脆地让开，而不是慢慢缩回去。
-    /// 延迟一小段时间再收起。
-    ///
-    /// 用于「点击卡片」：先让确认反馈显示一下，面板再让开。
-    /// 否则点击和收起同时发生，用户来不及确认自己点的是哪一个。
-    public func collapse(style: PanelTransition = .collapseHover, after delay: TimeInterval) {
-        guard delay > 0 else {
-            collapse(style: style)
-            return
-        }
-        cancelPendingCollapse()
-        let item = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated { self?.collapse(style: style) }
-        }
-        collapseWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
-    }
-
-    /// 取消尚未执行的自动收起。
-    /// 点击卡片时要用它把「鼠标移开」那条路径排下的收起取消掉，
-    /// 否则它会抢在确认反馈之前把面板收走。
-    public func cancelScheduledCollapse() {
-        cancelPendingCollapse()
-    }
-
     public func collapse(style: PanelTransition = .collapseHover) {
         guard state != .collapsed else { return }
         cancelPendingCollapse()

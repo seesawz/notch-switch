@@ -75,7 +75,16 @@ public final class HoverMonitor {
     private func evaluate() {
         guard let zone = hotZoneProvider?() else { return }
         let location = NSEvent.mouseLocation
-        let inside = zone.contains(location)
+        var inside = zone.contains(location)
+
+        // 正在拖动其他窗口（按住左键）时不触发展开（ADR-030）：
+        // 拖窗口经过刘海时面板突然弹出既挡视线，还可能吞掉松手点击造成误切换。
+        // 只抑制「进入」：已展开态下的按住（比如正在点卡片）不能把面板收走，
+        // 松手后下一次 mouseMoved 会正常判定进入。
+        if inside, !isInside, NSEvent.pressedMouseButtons & 1 != 0 {
+            inside = false
+        }
+
         guard inside != isInside else { return }
         isInside = inside
 

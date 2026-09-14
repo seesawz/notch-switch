@@ -5,8 +5,8 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
-    /// 点击卡片后，先让确认高亮显示多久再收起面板
-    private let actionConfirmDelay: TimeInterval = 0.11
+    /// 切换窗口后，卡片确认高亮保持多久
+    private let activationHighlightDuration: TimeInterval = 0.5
 
     private let permissions = PermissionsModel()
     private let metrics = NotchMetrics()
@@ -67,10 +67,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self else { return }
             switch state {
             case .expanded:
+                // 展开期间冻结排序：切换窗口会改变 MRU，列表跟着重排的话
+                // 被点的卡片会从鼠标底下跳走，下一张想点的位置也全变了
+                self.windowList.isOrderFrozen = true
                 self.windowList.refresh()
                 self.thumbnails.refresh(for: self.windowList.windows)
             case .collapsed:
                 self.selection.reset()
+                // 收起后解除冻结并重排一次，下次展开就是最新的最近使用顺序
+                self.windowList.isOrderFrozen = false
+                self.windowList.scheduleRefresh()
             }
         }
 
@@ -102,15 +108,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// 点击卡片：切窗口 + 收起面板
     private func activate(_ window: WindowInfo) {
-        // 1. 先立刻切窗口（不等动画，用户要的是「马上切过去」）
         windowList.activate(window)
 
-        // 2. 先用一下「点中了」的确认反馈，再收起面板。
-        //    取消掉待执行的自动收起，否则移开鼠标时那条路径会抢在前面收掉，
-        //    用户就看不到确认反馈了。
+        // 面板**不自动收起**：可以连着切好几个窗口，只有鼠标移开才收起。
+        // 所以这里刻意不做任何 collapse 调用，也不去干扰「鼠标移开」那条路径
+        // （如果鼠标正在离开，就应该让它正常收走）。
+
+        // 确认高亮只亮一下，避免一直挂着
         selection.markActivating(window.id)
-        panelController?.cancelScheduledCollapse()
-        panelController?.collapse(style: .collapseAction, after: actionConfirmDelay)
+        DispatchQueue.main.asyncAfter(deadline: .now() + activationHighlightDuration) { [weak self] in
+            self?.selection.clearActivating(window.id)
+        }
     }
 
     // MARK: - 权限引导
