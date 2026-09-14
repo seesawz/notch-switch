@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import NotchKit
 import SwiftUI
 
@@ -13,12 +14,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let windowList = WindowListModel()
     private let thumbnails = ThumbnailStore()
     private let selection = PanelSelection()
+    /// 用户在系统设置里的显示 / 辅助功能偏好。材质、描边、动画都必须由它决定。
+    private let display = SystemDisplayOptions()
     private var panelController: NotchPanelController?
     private var statusItemController: StatusItemController?
 
     private var guideWindow: NSWindow?
     private var debugWindow: NSWindow?
     private var auxiliaryWindows: [NSWindow] = []
+    /// 系统偏好订阅（当前只有「减弱动态效果」→ 面板动画档位）
+    private var subscriptions = Set<AnyCancellable>()
 
     // MARK: - 生命周期
 
@@ -27,6 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 滚动方向以用户的系统设置为依据（ADR-024），启动时留痕可审计
         Log.app.notice("滚动方向设置: 自然滚动=\(ScrollDelta.naturalScrollingEnabled, privacy: .public)（预览带语义：下滚/左滑=前进）")
         permissions.start()
+
+        // 系统显示/辅助功能偏好：材质与描边跟着它走，动画跟着「减弱动态效果」走。
+        // 启动时读一次并留痕 —— 「为什么没有玻璃效果」的答案就在这行。
+        display.start()
+        Log.app.notice("系统显示选项: \(self.display.debugDescription, privacy: .public)")
 
         permissions.onAccessibilityGranted = { [weak self] in
             // 不抢焦点，只把引导窗口提到本 App 最前，让用户看到状态已更新
@@ -46,12 +56,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     windowList: windowList,
                     thumbnails: thumbnails,
                     selection: selection,
+                    display: display,
                     onActivate: { [weak self] window in self?.activate(window) }
                 )
             ),
             metrics: metrics
         )
         panelController = controller
+
+        // 「减弱动态效果」要同时作用于窗口 frame 动画与 SwiftUI 内容动画。
+        // 控制器把有效档位广播进 metrics，视图侧不重复判断，避免两条路径各算各的。
+        display.$reduceMotion
+            .sink { [weak self] reduceMotion in
+                self?.panelController?.reduceMotion = reduceMotion
+            }
+            .store(in: &subscriptions)
 
         // 滚轮翻卡（PLAN.md §6.5）：传入连续位移量，由 PanelSelection 做帧同步跟随
         controller.onScroll = { [weak self] contentOffset in
@@ -109,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panelController?.stop()
         permissions.stop()
         windowList.stop()
+        display.stop()
     }
 
     /// 抓缩略图。**必须等面板不可见时再做**。
@@ -278,6 +298,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         lines.append("已缓存 \(thumbnails.images.count) 张")
         lines.append("抓取中: \(thumbnails.isCapturing)")
         if let error = thumbnails.lastError { lines.append("错误: \(error)") }
+        lines.append("")
+        lines.append("== 系统显示选项 ==")
+        lines.append(display.debugDescription)
+        lines.append("面板动画档位: \(panelController?.reduceMotion == true ? "已按「减弱动态效果」关闭" : "正常")")
         lines.append("")
         lines.append("== 权限 ==")
         lines.append("辅助功能: \(permissions.accessibilityGranted ? "已授权" : "未授权")")

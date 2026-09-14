@@ -12,6 +12,8 @@ struct NotchRootView: View {
     @ObservedObject var windowList: WindowListModel
     @ObservedObject var thumbnails: ThumbnailStore
     @ObservedObject var selection: PanelSelection
+    /// 用户在系统设置里的显示/辅助功能选项。材质与描边都由它决定，不在这里写死。
+    @ObservedObject var display: SystemDisplayOptions
 
     var onActivate: (WindowInfo) -> Void
 
@@ -90,9 +92,12 @@ struct NotchRootView: View {
         // 外层的淡出+缩放只作用于玻璃胶囊本身。
         .opacity(metrics.isExpanded ? 1 : 0)
         .animation(metrics.isExpanded ? contentAnimation : .linear(duration: 0), value: metrics.isExpanded)
-        .kimiGlass(in: stripShape)
+        .kimiGlass(in: stripShape, display: display)
         .overlay {
-            stripShape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+            stripShape.strokeBorder(
+                Kimi.borderColor(contrast: display.increaseContrast),
+                lineWidth: Kimi.borderWidth(contrast: display.increaseContrast)
+            )
         }
     }
 
@@ -153,8 +158,8 @@ struct NotchRootView: View {
         .frame(width: cardWidth, height: cardImageHeight)
         .overlay {
             cardImageShape.strokeBorder(
-                hovered ? Kimi.accent.opacity(0.85) : Color.primary.opacity(0.12),
-                lineWidth: hovered ? 1.5 : 0.5
+                hovered ? Kimi.accent.opacity(0.85) : Kimi.borderColor(contrast: display.increaseContrast),
+                lineWidth: Kimi.cardBorderWidth(hovered: hovered, contrast: display.increaseContrast)
             )
         }
         // 点击确认：先给一次「点中了」的反馈，面板再收起。

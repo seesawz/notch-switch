@@ -156,6 +156,54 @@ final class PanelTransitionTests: XCTestCase {
     }
 }
 
+/// 玻璃材质决策（ADR-034）。
+///
+/// 这条规则的含义是「材质必须跟着系统设置走」，最怕被后人为了方便改回硬编码，
+/// 所以逐条钉住。
+final class GlassMaterialPolicyTests: XCTestCase {
+
+    /// 「减弱透明度」是无障碍要求，优先级高于一切——包括我们自己的调试开关。
+    /// Apple 对该选项的要求：window 背景「should not be semi-transparent; they should be opaque」。
+    func testReduceTransparencyForcesOpaque() {
+        XCTAssertEqual(
+            GlassMaterialPolicy.resolve(reduceTransparency: true, supportsLiquidGlass: true, blurOverride: false),
+            .opaque
+        )
+        XCTAssertEqual(
+            GlassMaterialPolicy.resolve(reduceTransparency: true, supportsLiquidGlass: false, blurOverride: false),
+            .opaque
+        )
+        XCTAssertEqual(
+            GlassMaterialPolicy.resolve(reduceTransparency: true, supportsLiquidGlass: true, blurOverride: true),
+            .opaque,
+            "调试开关也不能越过无障碍要求"
+        )
+    }
+
+    func testLiquidGlassWhenSupportedAndTransparencyAllowed() {
+        XCTAssertEqual(
+            GlassMaterialPolicy.resolve(reduceTransparency: false, supportsLiquidGlass: true, blurOverride: false),
+            .liquidGlass
+        )
+    }
+
+    /// macOS 26 以下没有 NSGlassEffectView，必须回退毛玻璃
+    func testFallsBackToVibrancyBelowMacOS26() {
+        XCTAssertEqual(
+            GlassMaterialPolicy.resolve(reduceTransparency: false, supportsLiquidGlass: false, blurOverride: false),
+            .vibrancy
+        )
+    }
+
+    func testBlurOverrideBeatsLiquidGlass() {
+        XCTAssertEqual(
+            GlassMaterialPolicy.resolve(reduceTransparency: false, supportsLiquidGlass: true, blurOverride: true),
+            .vibrancy,
+            "A/B 对照用：强制走经典毛玻璃"
+        )
+    }
+}
+
 /// 滚动输入的归一化（PLAN.md §6.5）
 final class ScrollDeltaTests: XCTestCase {
 

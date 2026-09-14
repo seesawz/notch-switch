@@ -29,6 +29,16 @@ public final class NotchPanelController {
     /// 返回是否消费掉这次滚动（返回 `false` 时事件会继续传递，不会被面板吞掉）。
     public var onScroll: ((CGFloat) -> Bool)?
 
+    /// 系统「减弱动态效果」是否开启。开启时展开/收起不做动画 ——
+    /// Apple 对该选项的要求是 *"UI should avoid large animations"*。
+    /// 由 `SystemDisplayOptions` 在运行时注入，不在这里读系统值。
+    public var reduceMotion = false {
+        didSet {
+            guard reduceMotion != oldValue else { return }
+            Log.panel.notice("减弱动态效果 → \(self.reduceMotion ? "开（展开/收起不做动画）" : "关", privacy: .public)")
+        }
+    }
+
     private let panel: NotchPanel
     private let container: NotchContentContainer
     private let hostingView: NSHostingView<AnyView>
@@ -176,8 +186,9 @@ public final class NotchPanelController {
         cancelPendingCollapse()
         state = .expanded
         panel.ignoresMouseEvents = false
-        applyFrame(for: .expanded, transition: .expand)
-        metrics.setExpanded(true, transition: .expand)
+        let transition = effectiveTransition(.expand)
+        applyFrame(for: .expanded, transition: transition)
+        metrics.setExpanded(true, transition: transition)
         onStateChange?(state)
         Log.panel.notice("展开 → \(self.targetFrame(for: .expanded).debugString, privacy: .public)")
 
@@ -199,8 +210,9 @@ public final class NotchPanelController {
         cancelPendingCollapse()
         state = .collapsed
         panel.ignoresMouseEvents = true
-        applyFrame(for: .collapsed, transition: style)
-        metrics.setExpanded(false, transition: style)
+        let transition = effectiveTransition(style)
+        applyFrame(for: .collapsed, transition: transition)
+        metrics.setExpanded(false, transition: transition)
         onStateChange?(state)
         Log.panel.notice("收起 → \(self.targetFrame(for: .collapsed).debugString, privacy: .public)")
 
@@ -340,6 +352,12 @@ public final class NotchPanelController {
             width: size.width,
             height: size.height
         )
+    }
+
+    /// 系统「减弱动态效果」开启时，任何过渡都降级为「立即」。
+    /// frame 动画与 SwiftUI 内容动画都必须用这个结果，否则两边会对不上。
+    private func effectiveTransition(_ transition: PanelTransition) -> PanelTransition {
+        reduceMotion ? .immediate : transition
     }
 
     private func applyFrame(for state: State, transition: PanelTransition) {

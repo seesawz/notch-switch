@@ -5,7 +5,7 @@
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | v0.21（缩略图抓取时机） |
+| 文档版本 | v0.22（材质跟随系统设置） |
 | 最后更新 | 2026-09-14 |
 | 当前阶段 | M0~M3 已完成 · M4 部分完成（滚动已做，搜索待做） |
 | 目标平台 | macOS 14+（Apple Silicon 优先，Intel 尽力兼容） |
@@ -41,6 +41,7 @@
 | 2026-09-14 | v0.19 | **整理文档**：ADR 表与变更日志改为严格升序、去重；给被后续决策修订/推翻的 ADR（009/021/026/028）加醒目标记并补阅读说明；修正 v0.15 的版本引用笔误；补 v0.12 跳号说明 |
 | 2026-09-14 | v0.20 | **恢复 Liquid Glass 观感**：v0.19 的材质修复（ADR-029）修好了透视但把 `.glassEffect` 换成了经典毛玻璃，玻璃观感没了。改用 macOS 26 AppKit 原生 `NSGlassEffectView`（同时满足 behind-window 采样 + 真实 Liquid Glass），低版本仍回退 `NSVisualEffectView`。新增 `NotchSwitch.glassMaterial` 偏好开关用于 A/B（改完需重启）。新增 ADR-032 |
 | 2026-09-14 | v0.21 | **修复「卡片上半部分发白」**：根因是缩略图抓取时机 —— 面板在 level 1000，抓图时正盖在源窗口上方，抓出来的图里带着我们自己的面板。改为**只在面板不可见时抓**（启动 + 收起后 0.35s），展开时不再抓。同时保留了一套调试能力：`PanelCapture`（自截图，解决终端没有屏幕录制权限的问题）与原始缩略图导出。新增 ADR-033 |
+| 2026-09-14 | v0.22 | **材质改为跟随系统设置**（不再硬编码）：新增 `SystemDisplayOptions` 读取`NSWorkspace` 的辅助功能显示选项（减弱透明度 / 增强对比度 / 减弱动态效果 / 不依赖颜色），运行时监听变更无需重启；新增 `GlassMaterialPolicy` 纯函数决定材质（减弱透明度 → 不透明背景；macOS 26+ → Liquid Glass；更低 → 毛玻璃），单测 38 项。顺带记录一条边界：系统 Liquid Glass 的「透明/着色」开关无公开读取 API。新增 ADR-034 |
 
 ---
 
@@ -474,13 +475,24 @@ struct WindowInfo: Identifiable {
 
 ### 6.2 视觉与材质
 
-- macOS 26+：**Liquid Glass 已落地**：`.glassEffect(.regular, in:)`，唯一入口 `KimiTheme.kimiGlass`（见 ADR-026）
-- macOS 14/15：回退 `.ultraThinMaterial`（同一入口内分支）
+**材质完全由系统设置决定，不写死数值**（ADR-034）。唯一入口 `KimiTheme.kimiGlass(in:display:)`：
+
+| 条件 | 材质 |
+|---|---|
+| 系统开启「减弱透明度」 | **不透明背景**（`windowBackgroundColor`）—— Apple 原文要求 window 背景 "should be opaque" |
+| macOS 26+ | `NSGlassEffectView` 原生 Liquid Glass（ADR-032） |
+| macOS 14/15 | `NSVisualEffectView(.behindWindow, .active)` 毛玻璃（ADR-029） |
+| 调试 `NotchSwitch.forceVibrancy=true` | 强制毛玻璃，用于 A/B 对照 |
+
+> 系统设置里 Liquid Glass 的「透明 / 着色」开关**没有公开读取 API**，按 `NSGlassEffectView.h` 的文档化语义选 `.regular`（常规 UI 表面），渲染交给系统。
+
 - 品牌色：Kimi 蓝 `#4D6BFE` → 紫 `#8B5CF6` 渐变，**只做小面积点缀**（悬停描边、图标底、空态徽标），大面积一律中性玻璃
-- 收起态**完全不绘制内容**（零视觉侵入），可选：鼠标进入时 32pt 高的刘海下方出现 1pt 高亮线作为反馈
+- **描边跟随「增强对比度」**：正常 0.5pt / 10% 不透明度 → 开启后 1.5pt / 42%（Apple: "bolder lines"）
+- **悬停态不只靠颜色**：同时有加粗描边与 `scaleEffect(1.03)`，满足「不依赖颜色区分」
+- 收起态**完全不绘制内容**（零视觉侵入）
 - 动画：窗口 frame 用 `NSAnimationContext` 按 `PanelTransition` 档位驱动；内容用 SwiftUI 做 `opacity` + `scaleEffect(anchor: .top)`，**两者必须同档位同曲线**
-- 点击确认：卡片先描一圈强调色边 + 轻微按下（`scaleEffect(0.955)`），110ms 后面板才收起
-- 深色/浅色模式自动跟随；强调色跟随系统
+- 点击卡片**只给确认高亮，不收起面板**（ADR-031/032）：描一圈强调色边 + `scaleEffect(0.955)`，500ms 后自动清除
+- 深色/浅色模式自动跟随（`NSGlassEffectView` / `NSVisualEffectView` 的原生行为）
 
 ### 6.3 时序参数
 
@@ -499,6 +511,7 @@ struct WindowInfo: Identifiable {
 | 滚动驱动帧率 | 120Hz，仅滚动期间存在 |
 | 松手后的停位 | 原地（无吸附、无回弹） |
 | AX 事件节流窗口 | 200ms |
+| **系统「减弱动态效果」开启** | **以上动画全部降级为「立即」**（Apple: *"UI should avoid large animations"*），由 `NotchPanelController.reduceMotion` 统一生效 |
 
 ### 6.4 键盘
 
@@ -723,47 +736,10 @@ offset += (target - offset) × (1 − exp(−dt / τ))      τ = 0.035s
 | ADR-031 | 切换窗口后**不自动收起**面板，只有鼠标移开才收起；展开期间**冻结列表排序**（`WindowListModel.isOrderFrozen`） | 用户会连续切好几个窗口比对内容，每切一次就收起等于逼他重新划回刘海。但切换会改变 MRU 顺序，列表若跟着重排，**被点的那张卡会从鼠标底下跳走**，下一张想点的位置也全变了；因此展开期间只更新窗口集合、保持原顺序，新窗口追加到末尾，收起后再解除冻结重排一次（与 §8 R8「展开期间冻结重排」一致） | 2026-09-14 |
 | ADR-032 | macOS 26+ 的面板材质改用 AppKit 的 `NSGlassEffectView`；`NSVisualEffectView(behindWindow, .active)` 作为低版本回退；并提供 `NotchSwitch.glassMaterial` 偏好开关用于 A/B | ADR-029 修好了透视却丢了玻璃观感（退化成经典毛玻璃），用户立刻反馈「液态玻璃消失了」。三条约束必须同时成立：① 必须 behind-window 采样（SwiftUI 的 `Material` / `.glassEffect` 采样窗口内部，而我们窗内是空的）；② `NSVisualEffectView` 必须显式 `.state = .active`（Agent App 几乎永不活跃）；③ macOS 26+ 要 Liquid Glass 而不是普通毛玻璃。`.glassEffect` 满足不了 ①，而 AppKit 的 `NSGlassEffectView` 同时满足三条 —— 它既是原生 Liquid Glass，又按 behind-window 方式采样。视觉判断没法靠推断，故留运行时开关让用户一键对比 | 2026-09-14 |
 | ADR-033 | 缩略图**只在面板不可见时**抓取（启动时 + 每次收起后 0.35s），展开时不抓 | 面板窗口在 `level = .screenSaver`，展开时正盖在源窗口上方，ScreenCaptureKit 抓到的画面里会带上**我们自己的面板** —— 表现成「每张卡片上半部分一条整齐的浅色带」。这个 bug 靠肉眼无法定位到缩略图本身（看起来像是材质或叠加层的问题），是「导出原始缩略图 + 展开/收起两态像素级对照」才确认的：逐行像素差显示面板可见区正好是 y 33–181pt，布局完全正确，问题只能在图里。代价：面板展开期间新出现的窗口要等下次收起才有缩略图，先退化为应用图标 | 2026-09-14 |
+| ADR-034 | 玻璃材质、描边粗细、展开收起动画**一律读系统设置**，不写死数值；由 `SystemDisplayOptions` + `GlassMaterialPolicy` 统一决定 | 这些是用户在「系统设置」里明确表达过的偏好，macOS 通过公开 API 提供（`NSWorkspace (NSWorkspaceAccessibilityDisplay)`，macOS 10.10+），且 Apple 在头文件注释里直接写明了期望行为：① 减弱透明度 →「UI (mainly window) backgrounds should **not be semi-transparent**; they should be **opaque**」→ 面板背景必须变成不透明，不能再给玻璃；② 增强对比度 →「a less subtle color palette or **bolder lines**」→ 描边加粗、提高不透明度；③ 减弱动态效果 →「avoid **large animations**」→ 展开/收起不做动画；④ 不依赖颜色区分 →「should not convey information using **color alone**」→ 悬停态同时用加粗表达。之前硬编码 `style = .regular` + 固定描边是错的。**已知边界**：系统设置里那个 Liquid Glass「透明 / 着色」开关**没有公开读取 API**，`NSGlassEffectView.h` 只有 `style` / `cornerRadius` / `tintColor` / `contentView` 四个成员，故此处按文档化语义选 `.regular`（"Standard glass effect style"，用于常规 UI 表面），渲染由系统负责，不臆测用户偏好。决策抽成纯函数以便单测 | 2026-09-14 |
 
 
 ---
-
-### 14.9 视觉问题的排查手法（无需人工截图）
-
-UI 类问题靠「用户描述 + 猜」效率极低。本机已具备一套**可自动化**的视觉排查手段：
-
-```bash
-# 1. 开启面板自截图（App 自己有屏幕录制权限，终端没有）
-defaults write com.notchswitch.app NotchSwitch.capturePanelOnExpand -bool true
-
-# 2. 重启 App，然后把光标移到刘海触发展开
-./scripts/run-app.sh --install
-swift -e '' 2>/dev/null; echo 'import CoreGraphics
-CGWarpMouseCursorPosition(CGPoint(x: 864, y: 16))' | swift -
-
-# 3. 产物：展开态 / 收起态各一张（同一块屏幕区域，可直接对照）
-#    /tmp/notchswitch-expanded.png
-#    /tmp/notchswitch-collapsed.png
-```
-
-把光标移开即可拿到收起态那张。**两态对照 + 逐行像素差**能把「是我们的问题还是系统的样子」一刀切开 ——
-v0.21 那个缩略图 bug 就是靠它定位的：
-
-```
-差异区间: 行 66..361  =  屏幕 y 33.0..180.5 pt     # 正好是 topInset 33 + 内容 148 → 布局正确
-```
-
-另外还有两个开关：
-
-```bash
-# 导出原始缩略图，用来判断「卡片发白」是图本身的问题还是叠加层的
-defaults write com.notchswitch.app NotchSwitch.debugDumpThumbnail -bool true   # → /tmp/notchswitch-thumb.png
-
-# 材质替换成半透明红色，精确看出材质区域边界
-defaults write com.notchswitch.app NotchSwitch.debugGlassFill -bool true
-```
-
-> 注意：`defaults` 的键名必须带 `NotchSwitch.` 前缀，与代码里 `UserDefaults.standard` 读的键一致，
-> 否则会「设了但不生效」（踩过）。
 
 ## 10. 开放问题（待验证）
 
@@ -1041,3 +1017,41 @@ codesign -d -r- /Applications/NotchSwitch.app 2>&1 | grep designated
 **一条铁律：只从一个位置运行。**
 `build/` 和 `/Applications/` 各有一份时，TCC 会记录两套授权，而你永远搞不清点开的是哪一份。
 统一用 `./scripts/run-app.sh --install`。
+
+### 14.9 视觉问题的排查手法（无需人工截图）
+
+UI 类问题靠「用户描述 + 猜」效率极低。本机已具备一套**可自动化**的视觉排查手段：
+
+```bash
+# 1. 开启面板自截图（App 自己有屏幕录制权限，终端没有）
+defaults write com.notchswitch.app NotchSwitch.capturePanelOnExpand -bool true
+
+# 2. 重启 App，然后把光标移到刘海触发展开
+./scripts/run-app.sh --install
+swift -e '' 2>/dev/null; echo 'import CoreGraphics
+CGWarpMouseCursorPosition(CGPoint(x: 864, y: 16))' | swift -
+
+# 3. 产物：展开态 / 收起态各一张（同一块屏幕区域，可直接对照）
+#    /tmp/notchswitch-expanded.png
+#    /tmp/notchswitch-collapsed.png
+```
+
+把光标移开即可拿到收起态那张。**两态对照 + 逐行像素差**能把「是我们的问题还是系统的样子」一刀切开 ——
+v0.21 那个缩略图 bug 就是靠它定位的：
+
+```
+差异区间: 行 66..361  =  屏幕 y 33.0..180.5 pt     # 正好是 topInset 33 + 内容 148 → 布局正确
+```
+
+另外还有两个开关：
+
+```bash
+# 导出原始缩略图，用来判断「卡片发白」是图本身的问题还是叠加层的
+defaults write com.notchswitch.app NotchSwitch.debugDumpThumbnail -bool true   # → /tmp/notchswitch-thumb.png
+
+# 材质替换成半透明红色，精确看出材质区域边界
+defaults write com.notchswitch.app NotchSwitch.debugGlassFill -bool true
+```
+
+> 注意：`defaults` 的键名必须带 `NotchSwitch.` 前缀，与代码里 `UserDefaults.standard` 读的键一致，
+> 否则会「设了但不生效」（踩过）。
