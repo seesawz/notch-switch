@@ -45,6 +45,11 @@ struct NotchRootView: View {
 
             strip
                 .frame(height: contentHeight, alignment: .top)
+                // 内容跟随面板一起进出：淡入淡出 + 从顶边轻微缩放
+                // （锚点取 .top，视觉上就是「从刘海长出来 / 收回去」）
+                .opacity(metrics.isExpanded ? 1 : 0)
+                .scaleEffect(metrics.isExpanded ? 1 : 0.97, anchor: .top)
+                .animation(contentAnimation, value: metrics.isExpanded)
         }
         .frame(width: metrics.expandedSize.width,
                height: metrics.expandedSize.height,
@@ -54,6 +59,17 @@ struct NotchRootView: View {
         }
         .onChange(of: windowList.windows.count) { _, newCount in
             selection.update(totalCount: newCount)
+        }
+    }
+
+    /// 内容动画曲线与 `NotchPanelController` 的窗口 frame 动画**同档位同曲线**，
+    /// 否则「窗口在缩」和「内容在淡」会各走各的，看着发飘。
+    private var contentAnimation: Animation {
+        switch metrics.transition {
+        case .expand: .easeOut(duration: metrics.transition.duration)
+        case .collapseHover: .easeInOut(duration: metrics.transition.duration)
+        case .collapseAction: .easeIn(duration: metrics.transition.duration)
+        case .immediate: .linear(duration: 0)
         }
     }
 
@@ -136,6 +152,15 @@ struct NotchRootView: View {
                 lineWidth: hovered ? 1.5 : 0.5
             )
         }
+        // 点击确认：先给一次「点中了」的反馈，面板再收起。
+        // 没有这个的话，点击后面板直接缩回去，用户分不清是自己没点中还是已经生效了。
+        .overlay {
+            cardImageShape
+                .strokeBorder(Kimi.accent, lineWidth: 2)
+                .opacity(isActivating(window) ? 1 : 0)
+        }
+        .scaleEffect(isActivating(window) ? 0.955 : 1)
+        .animation(.easeOut(duration: 0.09), value: selection.activatingWindowID)
         .overlay(alignment: .bottomLeading) {
             if let icon = window.appIcon {
                 Image(nsImage: icon)
@@ -186,6 +211,10 @@ struct NotchRootView: View {
             }
         }
         .frame(width: cardWidth, height: cardImageHeight)
+    }
+
+    private func isActivating(_ window: WindowInfo) -> Bool {
+        selection.activatingWindowID == window.id
     }
 
     private func titleRow(for window: WindowInfo) -> some View {

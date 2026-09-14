@@ -5,6 +5,9 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
+    /// 点击卡片后，先让确认高亮显示多久再收起面板
+    private let actionConfirmDelay: TimeInterval = 0.11
+
     private let permissions = PermissionsModel()
     private let metrics = NotchMetrics()
     private let windowList = WindowListModel()
@@ -21,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.notice("NotchSwitch 启动 · bundle=\(Bundle.main.bundleURL.path, privacy: .public)")
+        // 滚动方向以用户的系统设置为依据（ADR-024），启动时留痕可审计
+        Log.app.notice("滚动方向设置: 自然滚动=\(ScrollDelta.naturalScrollingEnabled, privacy: .public)（预览带语义：下滚/左滑=前进）")
         permissions.start()
 
         permissions.onAccessibilityGranted = { [weak self] in
@@ -97,8 +102,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// 点击卡片：切窗口 + 收起面板
     private func activate(_ window: WindowInfo) {
+        // 1. 先立刻切窗口（不等动画，用户要的是「马上切过去」）
         windowList.activate(window)
-        panelController?.collapse()
+
+        // 2. 先用一下「点中了」的确认反馈，再收起面板。
+        //    取消掉待执行的自动收起，否则移开鼠标时那条路径会抢在前面收掉，
+        //    用户就看不到确认反馈了。
+        selection.markActivating(window.id)
+        panelController?.cancelScheduledCollapse()
+        panelController?.collapse(style: .collapseAction, after: actionConfirmDelay)
     }
 
     // MARK: - 权限引导

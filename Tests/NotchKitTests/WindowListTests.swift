@@ -131,6 +131,31 @@ final class ScrollFollowTests: XCTestCase {
     }
 }
 
+/// 动画档位（PLAN.md §6.3 / ADR-025）
+final class PanelTransitionTests: XCTestCase {
+
+    /// 点击卡片后的收起必须比鼠标移开更快——用户已经做完决定了，面板要迅速让开。
+    /// 这条是产品决策，不能靠以后随手调参数时无意破坏。
+    func testActionCollapseIsFasterThanHoverCollapse() {
+        XCTAssertLessThan(
+            PanelTransition.collapseAction.duration,
+            PanelTransition.collapseHover.duration
+        )
+    }
+
+    /// 收起一律不能比展开慢，否则会显得黏
+    func testCollapseIsNotSlowerThanExpand() {
+        XCTAssertLessThanOrEqual(PanelTransition.collapseAction.duration, PanelTransition.expand.duration)
+        XCTAssertLessThanOrEqual(PanelTransition.collapseHover.duration, PanelTransition.expand.duration)
+    }
+
+    func testImmediateHasNoDurationAndSkipsContentAnimation() {
+        XCTAssertEqual(PanelTransition.immediate.duration, 0)
+        XCTAssertFalse(PanelTransition.immediate.animatesContent)
+        XCTAssertTrue(PanelTransition.collapseAction.animatesContent)
+    }
+}
+
 /// 滚动输入的归一化（PLAN.md §6.5）
 final class ScrollDeltaTests: XCTestCase {
 

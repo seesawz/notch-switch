@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// 滚动输入的归一化（PLAN.md §6.5）。
 ///
@@ -40,12 +41,23 @@ public enum ScrollDelta {
         return max(-maxWheelStep, min(maxWheelStep, points))
     }
 
+    /// 用户的「自然滚动」设置（系统设置 → 鼠标/触控板；键 `com.apple.swipescrolldirection`，
+    /// 出厂默认 = 开）。**方向必须以这个设置为依据，不靠猜**（ADR-024）。
+    ///
+    /// 这项设置的生效方式是：系统把它直接应用在派发给 App 的 `scrollingDelta` 上——
+    /// 这是设置进入 App 的唯一通道（否则用户一切换设置，所有 App 的滚动都会反向）。
+    /// 所以 `stripOffset` 的映射固定不变：delta 里已经带着用户设置的结果。
+    /// 在这里再按设置键翻一次反而会双重翻转。读取它用于启动日志留痕，让方向行为可审计。
+    public static var naturalScrollingEnabled: Bool {
+        UserDefaults.standard.object(forKey: "com.apple.swipescrolldirection") as? Bool ?? true
+    }
+
     /// 预览带的内容位移：主导轴换算 + 方向翻转（ADR-024）。
     ///
     /// NSEvent 的滚动 delta 遵循「**+ = 回退**」的约定（垂直 + = 向上滚 = 露出更早的内容，
-    /// 水平 + = 向左滑同理）。预览带要的是「向下滚 / 向左滑 = 前进（露出后面的卡片）」，
-    /// 所以整体取反。系统已按用户的「自然滚动」设置翻转过 delta 符号，
-    /// 取反之后方向就**自动跟随系统设置**，不需要自己读偏好。
+    /// 水平 + = 向左滑同理）；符号已含 `naturalScrollingEnabled` 的结果。
+    /// 预览带语义：「向下滚 / 向左滑 = 前进（露出后面的卡片）」，故整体取反一次。
+    /// 用户切换系统滚动设置时，delta 符号随之翻转，预览带方向立即跟随。
     public static func stripOffset(deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool) -> CGFloat {
         -contentOffset(for: dominant(deltaX: deltaX, deltaY: deltaY), hasPreciseDeltas: hasPreciseDeltas)
     }

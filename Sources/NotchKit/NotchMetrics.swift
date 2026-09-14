@@ -17,11 +17,23 @@ public final class NotchMetrics: ObservableObject {
     /// 当前屏幕是否有刘海
     @Published public private(set) var hasNotch: Bool = true
 
+    /// 面板当前是否展开。SwiftUI 内容用它做淡入淡出与缩放。
+    @Published public private(set) var isExpanded: Bool = false
+    /// 本次变化使用的动画档位，供 SwiftUI 侧对齐曲线
+    @Published public private(set) var transition: PanelTransition = .expand
+
     public init() {}
 
     func update(topInset: CGFloat, expandedSize: CGSize, hasNotch: Bool) {
         if self.topInset != topInset { self.topInset = topInset }
         if self.expandedSize != expandedSize { self.expandedSize = expandedSize }
         if self.hasNotch != hasNotch { self.hasNotch = hasNotch }
+    }
+
+    /// 先设档位再设状态，保证 SwiftUI 在**同一次**更新里同时看到两者，
+    /// 否则会先用上一档的曲线播一次，出现半帧的曲线错配。
+    func setExpanded(_ expanded: Bool, transition: PanelTransition) {
+        if self.transition != transition { self.transition = transition }
+        if self.isExpanded != expanded { self.isExpanded = expanded }
     }
 }

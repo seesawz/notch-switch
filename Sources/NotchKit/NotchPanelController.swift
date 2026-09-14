@@ -72,7 +72,7 @@ public final class NotchPanelController {
         panel.contentView = container
 
         refreshScreen()
-        applyFrame(for: .collapsed, animated: false)
+        applyFrame(for: .collapsed, transition: .immediate)
         // 显式设置一次层级，不依赖「守卫状态发生变化」这个前提
         applyLevel()
         panel.orderFrontRegardless()
@@ -174,17 +174,45 @@ public final class NotchPanelController {
         cancelPendingCollapse()
         state = .expanded
         panel.ignoresMouseEvents = false
-        applyFrame(for: .expanded, animated: true)
+        applyFrame(for: .expanded, transition: .expand)
+        metrics.setExpanded(true, transition: .expand)
         onStateChange?(state)
         Log.panel.notice("展开 → \(self.targetFrame(for: .expanded).debugString, privacy: .public)")
     }
 
-    public func collapse() {
+    /// - Parameter style: 收起档位。点击卡片后用 `.collapseAction`——
+    ///   用户已经做完决定了，面板要更快更干脆地让开，而不是慢慢缩回去。
+    /// 延迟一小段时间再收起。
+    ///
+    /// 用于「点击卡片」：先让确认反馈显示一下，面板再让开。
+    /// 否则点击和收起同时发生，用户来不及确认自己点的是哪一个。
+    public func collapse(style: PanelTransition = .collapseHover, after delay: TimeInterval) {
+        guard delay > 0 else {
+            collapse(style: style)
+            return
+        }
+        cancelPendingCollapse()
+        let item = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.collapse(style: style) }
+        }
+        collapseWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    /// 取消尚未执行的自动收起。
+    /// 点击卡片时要用它把「鼠标移开」那条路径排下的收起取消掉，
+    /// 否则它会抢在确认反馈之前把面板收走。
+    public func cancelScheduledCollapse() {
+        cancelPendingCollapse()
+    }
+
+    public func collapse(style: PanelTransition = .collapseHover) {
         guard state != .collapsed else { return }
         cancelPendingCollapse()
         state = .collapsed
         panel.ignoresMouseEvents = true
-        applyFrame(for: .collapsed, animated: true)
+        applyFrame(for: .collapsed, transition: style)
+        metrics.setExpanded(false, transition: style)
         onStateChange?(state)
         Log.panel.notice("收起 → \(self.targetFrame(for: .collapsed).debugString, privacy: .public)")
     }
@@ -259,7 +287,7 @@ public final class NotchPanelController {
         Log.panel.notice("屏幕参数变化（插拔/分辨率/缩放）→ 重算几何")
         refreshScreen()
         collapse()
-        applyFrame(for: .collapsed, animated: false)
+        applyFrame(for: .collapsed, transition: .immediate)
         Log.panel.notice("新几何: 刘海=\(self.notchFrame.debugString, privacy: .public) 顶部留白=\(Double(self.topInset), privacy: .public)")
     }
 
@@ -316,19 +344,23 @@ public final class NotchPanelController {
         )
     }
 
-    private func applyFrame(for state: State, animated: Bool) {
+    private func applyFrame(for state: State, transition: PanelTransition) {
         container.contentSize = expandedSize
         let target = targetFrame(for: state)
 
-        guard animated else {
+        guard transition != .immediate else {
             panel.setFrame(target, display: true)
             container.needsLayout = true
             return
         }
 
+        let points = transition.controlPoints
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.0, 0.24, 1.0)
+            context.duration = transition.duration
+            context.timingFunction = CAMediaTimingFunction(
+                controlPoints: Float(points.x1), Float(points.y1),
+                Float(points.x2), Float(points.y2)
+            )
             panel.animator().setFrame(target, display: true)
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated { self?.container.needsLayout = true }

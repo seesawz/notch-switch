@@ -12,6 +12,10 @@ public final class PanelSelection: ObservableObject {
     /// 当前渲染偏移（点）。视图用 `offset(x: -offset)` 直接消费。
     @Published public private(set) var offset: CGFloat = 0
 
+    /// 刚刚被点击的卡片。用于在面板收起前给一次「点中了」的视觉确认——
+    /// 否则点击后面板直接缩回去，用户不知道是自己没点中还是已经生效了。
+    @Published public private(set) var activatingWindowID: CGWindowID?
+
     /// 可视卡片数（固定 4，PLAN.md §6.1 / ADR-009）
     public let visibleCount: Int
     /// 每张卡占用的水平步距 = 卡片宽 + 间距
@@ -72,7 +76,13 @@ public final class PanelSelection: ObservableObject {
     public func reset() {
         follow.reset()
         offset = 0
+        activatingWindowID = nil
         stopTicking()
+    }
+
+    /// 标记某张卡被点击（切换前的确认高亮）
+    public func markActivating(_ windowID: CGWindowID) {
+        activatingWindowID = windowID
     }
 
     // MARK: - 帧驱动

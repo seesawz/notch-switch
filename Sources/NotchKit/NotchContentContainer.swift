@@ -78,6 +78,18 @@ public final class NotchContentContainer: NSView {
         // 只有真的产生了滚动才消费事件；没有可滚动内容时让它继续传递
         guard onScroll?(contentOffset) == true else { return false }
 
+        // 高频细节走 debug 级：排查「方向不对/没反应」时用它拿本机真实 delta，
+        // 不靠推断（/usr/bin/log stream --debug）
+        // 注意：必须用多行字符串 `"""`。Swift 的 `\` 续行只在多行字符串里有效，
+        // 普通字符串字面量跨行会直接报「unterminated string literal」。
+        Log.panel.debug(
+            """
+            scroll dX=\(Double(deltaX), privacy: .public) \
+            dY=\(Double(deltaY), privacy: .public) \
+            precise=\(hasPreciseDeltas, privacy: .public) → 位移=\(Double(contentOffset), privacy: .public)
+            """
+        )
+
         lastHandledEventTimestamp = timestamp
         return true
     }
