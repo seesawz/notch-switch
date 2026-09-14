@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let activationHighlightDuration: TimeInterval = 0.5
 
     private let permissions = PermissionsModel()
+    private let settings = AppSettings()
     private let metrics = NotchMetrics()
     private let windowList = WindowListModel()
     private let thumbnails = ThumbnailStore()
@@ -75,6 +76,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             .store(in: &subscriptions)
 
+        // 无刘海屏幕的顶部触发开关：@Published 订阅即发当前值，
+        // 所以 start() 之前面板就能拿到持久化过的初值（ADR-036）
+        settings.$hoverWithoutNotch
+            .sink { [weak self] hoverWithoutNotch in
+                self?.panelController?.hoverWithoutNotch = hoverWithoutNotch
+            }
+            .store(in: &subscriptions)
+
         // 滚轮翻卡（PLAN.md §6.5）：传入连续位移量，由 PanelSelection 做帧同步跟随
         controller.onScroll = { [weak self] contentOffset in
             guard let self else { return false }
@@ -109,10 +118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         controller.start()
 
-        let statusItem = StatusItemController(permissions: permissions)
+        let statusItem = StatusItemController(permissions: permissions, settings: settings)
         statusItem.setCallbacks(
             .init(
                 togglePanel: { [weak self] in self?.panelController?.toggle() },
+                toggleHoverWithoutNotch: { [weak self] in self?.settings.toggleHoverWithoutNotch() },
                 showDebugPanel: { [weak self] in self?.showDebugPanel() },
                 showPermissionGuide: { [weak self] in self?.showPermissionGuide() },
                 relaunch: { [weak self] in self?.relaunch() },

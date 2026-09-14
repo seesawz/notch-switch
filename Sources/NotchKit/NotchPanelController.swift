@@ -21,6 +21,19 @@ public final class NotchPanelController {
     public var expandedWidthLimit: CGFloat = 772
     /// 收起后延迟多久折叠（滞回，避免边界抖动）
     public var collapseDelay: TimeInterval = 0.24
+    /// 无刘海屏幕上是否保留「顶部中央」悬停热区（PLAN.md §4.8「或按设置不启用」）。
+    /// 有刘海的屏幕不受影响；关闭只停用悬停触发，菜单栏的「展开 / 收起」始终可用。
+    public var hoverWithoutNotch = true {
+        didSet {
+            guard hoverWithoutNotch != oldValue else { return }
+            Log.panel.notice("无刘海顶部触发 → \(self.hoverWithoutNotch ? "开" : "关", privacy: .public)")
+            // 关闭时面板还开着的话立刻收走——此时热区已消失，
+            // 「鼠标移开」路径不会再触发，不收就永远挂在那了
+            if !hoverWithoutNotch, state == .expanded {
+                collapse(style: .collapseAction)
+            }
+        }
+    }
 
     /// 面板几何的对外广播，供 SwiftUI 内容读取顶部留白与展开尺寸
     public let metrics: NotchMetrics
@@ -384,7 +397,10 @@ public final class NotchPanelController {
     }
 
     /// 热区：收起态略微外扩（否则贴着刘海很难命中），展开态跟随面板整体。
-    private func currentHotZone() -> CGRect {
+    /// 无刘海屏幕且设置关闭时返回 `nil` —— 悬停完全不触发（`HoverMonitor` 对 nil 直接跳过）。
+    private func currentHotZone() -> CGRect? {
+        // 每次现算而不是缓存：插拔显示器后 hasNotch 会变，热区必须立刻跟上
+        guard hoverWithoutNotch || screen?.hasNotch == true else { return nil }
         switch state {
         case .collapsed:
             return notchFrame.insetBy(dx: -48, dy: -10)
@@ -406,7 +422,8 @@ public final class NotchPanelController {
         窗口 frame: \(panel.frame)
         层级: \(panel.level.rawValue)
         挂起: \(isSuspended)  守卫: \(layerGuard.blocker)
-        热区: \(currentHotZone().debugString)
+        热区: \(currentHotZone()?.debugString ?? "nil（无刘海且已按设置禁用）")
+        无刘海顶部触发: \(hoverWithoutNotch ? "开" : "关")
         鼠标位置: \(NSEvent.mouseLocation.debugString)
         自身窗口: \(ownWindowPresented)
         悬停状态: \(hover.debugState)

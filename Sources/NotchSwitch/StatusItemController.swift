@@ -7,6 +7,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     struct Callbacks {
         var togglePanel: () -> Void
+        var toggleHoverWithoutNotch: () -> Void
         var showDebugPanel: () -> Void
         var showPermissionGuide: () -> Void
         var relaunch: () -> Void
@@ -17,15 +18,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let permissions: PermissionsModel
+    private let settings: AppSettings
     private var callbacks: Callbacks?
 
     private let accessibilityItem = NSMenuItem(title: "辅助功能权限", action: nil, keyEquivalent: "")
     private let screenRecordingItem = NSMenuItem(title: "屏幕录制权限", action: nil, keyEquivalent: "")
     private let locationItem = NSMenuItem(title: "运行位置", action: nil, keyEquivalent: "")
+    private let hoverWithoutNotchItem = NSMenuItem(title: "无刘海屏幕顶部触发", action: #selector(toggleHoverWithoutNotch), keyEquivalent: "")
     private var appearanceTimer: Timer?
 
-    init(permissions: PermissionsModel) {
+    init(permissions: PermissionsModel, settings: AppSettings) {
         self.permissions = permissions
+        self.settings = settings
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
 
@@ -77,6 +81,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         toggle.target = self
         menu.addItem(toggle)
 
+        // 无刘海机器上「是否保留顶部中央热区」的开关（ADR-036）。
+        // 有刘海的屏幕用不到它——menuNeedsUpdate 里会按当前屏幕情况隐藏。
+        hoverWithoutNotchItem.target = self
+        menu.addItem(hoverWithoutNotchItem)
+
         let debug = NSMenuItem(title: "调试面板…", action: #selector(showDebugPanel), keyEquivalent: "d")
         debug.target = self
         menu.addItem(debug)
@@ -108,9 +117,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         accessibilityItem.title = "辅助功能权限：\(permissions.accessibilityGranted ? "已授权" : "未授权")"
         screenRecordingItem.title = "屏幕录制权限：\(permissions.screenRecordingGranted ? "已授权" : "未授权")"
         locationItem.title = "运行位置：\(permissions.bundlePath)"
+
+        // 只要有任何一块带刘海的屏幕，面板就贴刘海，这个开关就没有意义 → 隐藏。
+        // 与 NotchPanelController.refreshScreen 的选屏规则一致：优先带刘海的屏。
+        hoverWithoutNotchItem.isHidden = NSScreen.screens.contains { $0.notchFrame != nil }
+        hoverWithoutNotchItem.state = settings.hoverWithoutNotch ? .on : .off
     }
 
     @objc private func togglePanel() { callbacks?.togglePanel() }
+    @objc private func toggleHoverWithoutNotch() { callbacks?.toggleHoverWithoutNotch() }
     @objc private func showDebugPanel() { callbacks?.showDebugPanel() }
     @objc private func showPermissionGuide() { callbacks?.showPermissionGuide() }
     @objc private func relaunch() { callbacks?.relaunch() }
