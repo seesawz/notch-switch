@@ -19,26 +19,21 @@ enum Kimi {
 }
 
 extension View {
-    /// 面板材质：采样**窗口背后**的毛玻璃。
+    /// 面板材质入口（ADR-029 / ADR-032）。
     ///
-    /// 全项目唯一的材质入口（ADR-029）。**不要换成 `.ultraThinMaterial` 或 `.glassEffect`**：
-    /// 那两者采样的是窗口内部的内容，而本面板是透明浮层、窗内是空的，
-    /// 换过去会立刻丢掉透视效果（表现为一片平坦的半透明灰）。
+    /// **不要换成 `.ultraThinMaterial` 或 `.glassEffect`**：那两者采样的是窗口**内部**内容，
+    /// 而本面板是透明浮层、窗内是空的，换过去会立刻丢掉透视（表现为一片平坦的半透明灰）。
+    /// Liquid Glass 的观感由 AppKit 的 `NSGlassEffectView` 提供，细节见 `GlassSurface`。
+    ///
+    /// 想对比经典毛玻璃：
+    /// ```
+    /// defaults write com.notchswitch.app glassMaterial blur   # 重启 App 生效
+    /// ```
     @ViewBuilder
-    func kimiGlass(
-        in shape: some Shape,
-        material: NSVisualEffectView.Material = .hudWindow,
-        tint: Color? = nil
-    ) -> some View {
+    func kimiGlass(in shape: some Shape, tint: Color? = nil) -> some View {
         background {
-            BehindWindowMaterial(material: material)
+            GlassSurface(tint: tint)
                 .clipShape(shape)
-                .overlay {
-                    // 极淡的品牌着色，避免纯灰
-                    if let tint {
-                        shape.fill(tint.opacity(0.10))
-                    }
-                }
         }
     }
 }

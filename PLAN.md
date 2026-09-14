@@ -5,7 +5,7 @@
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | v0.19（文档整理） |
+| 文档版本 | v0.20（Liquid Glass 恢复） |
 | 最后更新 | 2026-09-14 |
 | 当前阶段 | M0~M3 已完成 · M4 部分完成（滚动已做，搜索待做） |
 | 目标平台 | macOS 14+（Apple Silicon 优先，Intel 尽力兼容） |
@@ -39,6 +39,7 @@
 | 2026-09-14 | v0.17 | **收起动画改灵动岛式 + 拖拽保护**：① 收起时预览内容在**一帧内**消失，只留空玻璃胶囊缩回刘海——预览图跟着面板一起缩会在亮色窗口上闪白（实测），内容只参与展开淡入，不参与收起动画；② **按住左键拖动其他窗口时不触发展开**（ADR-030），拖窗口经过刘海不再被弹出的面板挡路，松手后正常判定进入 |
 | 2026-09-14 | v0.18 | **两个实测问题**：① **切换窗口后不再自动收起**，只有鼠标移开才收起——可以连着切好几个窗口；配套引入「展开期间冻结排序」（`WindowListModel.isOrderFrozen`），否则切换会改变 MRU、被点的卡片会从鼠标底下跳走。② **修复 Liquid Glass 透视失效**：根因是材质默认 `state = .followsWindowActiveState`，而本 App 是 Agent、点击也不激活自己，**几乎永远处于「不活跃」**，玻璃会一直渲染成平坦的非活跃外观；同时 `.glassEffect` 采样的是**窗口内**内容，而透明浮层窗内是空的。改用 `NSVisualEffectView(blendingMode: .behindWindow, state: .active)`。新增 ADR-029~031 |
 | 2026-09-14 | v0.19 | **整理文档**：ADR 表与变更日志改为严格升序、去重；给被后续决策修订/推翻的 ADR（009/021/026/028）加醒目标记并补阅读说明；修正 v0.15 的版本引用笔误；补 v0.12 跳号说明 |
+| 2026-09-14 | v0.20 | **恢复 Liquid Glass 观感**：v0.19 的材质修复（ADR-029）修好了透视但把 `.glassEffect` 换成了经典毛玻璃，玻璃观感没了。改用 macOS 26 AppKit 原生 `NSGlassEffectView`（同时满足 behind-window 采样 + 真实 Liquid Glass），低版本仍回退 `NSVisualEffectView`。新增 `NotchSwitch.glassMaterial` 偏好开关用于 A/B（改完需重启）。新增 ADR-032 |
 
 ---
 
@@ -400,6 +401,8 @@ NotchSwitch/                        SwiftPM 包（ADR-011）
 │   ├── PermissionsModel.swift          权限状态轮询与申请
 │   ├── StatusItemController.swift      菜单栏入口
 │   └── UI/
+│       ├── KimiTheme.swift                 材质与品牌令牌的唯一入口
+│       ├── GlassSurface.swift              面板背景：Liquid Glass / 毛玻璃
 │       ├── NotchRootView.swift             面板内容：横向窗口预览条
 │       ├── PermissionGuideView.swift       权限引导
 │       └── DebugPanelView.swift            调试面板
@@ -714,9 +717,10 @@ offset += (target - offset) × (1 − exp(−dt / τ))      τ = 0.035s
 | ADR-026 | **UI 材质统一走 `KimiTheme.kimiGlass`**：macOS 26+ 用 `.glassEffect`（Liquid Glass），14/15 回退 `.ultraThinMaterial`；品牌渐变只做小面积点缀；改版**不动任何几何与交互参数** | 「26 玻璃 / 低版本模糊」的 `#available` 分支只写一处，视图层不重复判断；玻璃材质与 Tahoe 菜单栏融合是核心观感（§2.3 差异化第 2 条）；滚动/展开手感已调通（v0.9/v0.10），视觉改版不碰布局尺寸、位移与动画时序，避免回归 <br>⚠️ **已被 ADR-029 推翻**：材质改为 behind-window | 2026-09-14 |
 | ADR-027 | 收起动画分档：点击卡片用 `.collapseAction`（140ms ease-in），鼠标移开用 `.collapseHover`（200ms ease-in-out）；展开用 `.expand`（220ms ease-out）；另有 `.immediate` 供切屏等场景。内容淡入淡出**必须与 frame 动画同档位同曲线** | 收起重在「让开」：用户点完卡片就已经做完决定了，面板要迅速让开，慢慢缩回去会显得黏。而展开稍慢一点才有「从刘海长出来」的感觉。内容与 frame 若各用各的曲线，会看到「窗口在缩但内容不跟」，发飘 | 2026-09-14 |
 | ADR-028 | 点击卡片后先展示 **110ms 的确认高亮**再收起面板；同时取消掉「鼠标移开」路径已排下的收起 | 原来点击后面板立即缩回，用户分不清是「没点中」还是「已经生效」——尤其是目标窗口要几百毫秒才浮到前台。加一次明确的按压反馈，代价只有 110ms。**必须同时取消已排下的收起**，否则「鼠标移开」那条路径会抢在反馈之前把面板收走 <br>⚠️ **已被 ADR-031 修订**：切换后不再收起面板 | 2026-09-14 |
-| ADR-029 | 面板材质改用 `NSVisualEffectView(blendingMode: .behindWindow, state: .active)`，**不用 `.glassEffect` / `.ultraThinMaterial`** | 两个原因：① `state` 默认是 `.followsWindowActiveState`，而 NotchSwitch 是 Agent、点击也不激活自己（`nonactivatingPanel`），**几乎永远处于「不活跃」**，玻璃会一直渲染成平坦的非活跃外观——这是「透视失效」的主因；② SwiftUI 的玻璃/毛玻璃材质采样的是**窗口内部**的内容，而本面板是透明浮层、窗内除预览带外什么都没有，只能折射一片空白。要让浮层透出桌面与菜单栏，必须用 `.behindWindow` 混合模式。入口统一在 `UI/KimiTheme.swift` | 2026-09-14 |
+| ADR-029 | 面板材质改用 `NSVisualEffectView(blendingMode: .behindWindow, state: .active)`，**不用 `.glassEffect` / `.ultraThinMaterial`** | 两个原因：① `state` 默认是 `.followsWindowActiveState`，而 NotchSwitch 是 Agent、点击也不激活自己（`nonactivatingPanel`），**几乎永远处于「不活跃」**，玻璃会一直渲染成平坦的非活跃外观——这是「透视失效」的主因；② SwiftUI 的玻璃/毛玻璃材质采样的是**窗口内部**的内容，而本面板是透明浮层、窗内除预览带外什么都没有，只能折射一片空白。要让浮层透出桌面与菜单栏，必须用 `.behindWindow` 混合模式。入口统一在 `UI/KimiTheme.swift` <br>⚠️ **已被 ADR-032 细化**：macOS 26+ 改用 `NSGlassEffectView` 以恢复 Liquid Glass 观感 | 2026-09-14 |
 | ADR-030 | **按住左键拖动窗口时抑制热区「进入」**：`HoverMonitor` 在 `inside && !isInside && 左键按下` 时判为未进入；只抑制进入、不抑制离开 | 拖窗口经过刘海是最常见的拖放路径，面板此时弹出既挡视线，面板若接住松手点击还会误触发切换。只挡「进入」保证已展开态下点卡片不受影响；松手后下一次 mouseMoved 自然补上进入判定，无需额外状态 |
 | ADR-031 | 切换窗口后**不自动收起**面板，只有鼠标移开才收起；展开期间**冻结列表排序**（`WindowListModel.isOrderFrozen`） | 用户会连续切好几个窗口比对内容，每切一次就收起等于逼他重新划回刘海。但切换会改变 MRU 顺序，列表若跟着重排，**被点的那张卡会从鼠标底下跳走**，下一张想点的位置也全变了；因此展开期间只更新窗口集合、保持原顺序，新窗口追加到末尾，收起后再解除冻结重排一次（与 §8 R8「展开期间冻结重排」一致） | 2026-09-14 |
+| ADR-032 | macOS 26+ 的面板材质改用 AppKit 的 `NSGlassEffectView`；`NSVisualEffectView(behindWindow, .active)` 作为低版本回退；并提供 `NotchSwitch.glassMaterial` 偏好开关用于 A/B | ADR-029 修好了透视却丢了玻璃观感（退化成经典毛玻璃），用户立刻反馈「液态玻璃消失了」。三条约束必须同时成立：① 必须 behind-window 采样（SwiftUI 的 `Material` / `.glassEffect` 采样窗口内部，而我们窗内是空的）；② `NSVisualEffectView` 必须显式 `.state = .active`（Agent App 几乎永不活跃）；③ macOS 26+ 要 Liquid Glass 而不是普通毛玻璃。`.glassEffect` 满足不了 ①，而 AppKit 的 `NSGlassEffectView` 同时满足三条 —— 它既是原生 Liquid Glass，又按 behind-window 方式采样。视觉判断没法靠推断，故留运行时开关让用户一键对比 | 2026-09-14 |
 
 
 ---
