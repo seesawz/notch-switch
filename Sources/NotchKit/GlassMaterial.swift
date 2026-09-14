@@ -52,7 +52,7 @@ public enum GlassMaterialPolicy {
 ///
 /// **背景**：系统设置里 Liquid Glass 的「透明 / 着色」开关**没有公开读取 API**
 /// （`NSGlassEffectView.h` 只有 `style` / `cornerRadius` / `tintColor` / `contentView` 四个成员，
-/// 没有任何表示用户偏好的属性）。既然读不到，就固定取**语义上最透明**的那一档。
+/// 没有任何表示用户偏好的属性）。读不到就由我们定，现行值见下方「演变」。
 ///
 /// 依据（头文件原文）：
 /// ```
@@ -61,19 +61,24 @@ public enum GlassMaterialPolicy {
 /// /// Clear glass effect style.
 /// NSGlassEffectViewStyleClear
 /// ```
-/// `.clear` 是两档中唯一带 "Clear" 语义的，即最透明。
+/// `.regular`（标准档，现行）/ `.clear`（最透明档）。
 ///
+/// **演变**：v0.23（ADR-035）取最透明的 `.clear`；后续实测浅色背景下可读性不行
+/// （ADR-035 预留的信号触发），先叠 50% 底色（ADR-038），再按用户要求换更浓的
+/// `.regular`（ADR-039）——系统菜单栏那种玻璃感。若觉得太厚，调 `Kimi.glassVeilOpacity`（可降为 0）。
 /// 代价（必须知情）：玻璃越透明，直接压在面板上的文字越难读。
-/// 我们面板里的主要内容是**缩略图**（本身不透明，不受影响）与单行标题；
-/// 若在杂乱背景上标题可读性变差，这就是回退到 `.regular` 的信号。
+/// 我们面板里的主要内容是**缩略图**（本身不透明，不受影响）与单行标题。
+///
+/// **后续（ADR-038/039）**：可读性信号实测触发。现行为 `.regular` + 玻璃上叠
+/// 50% 窗口背景色（`Kimi.glassVeilOpacity`）；若嫌太实可降 veil 或回 `.clear`。
 @available(macOS 26.0, *)
 public enum GlassStylePolicy {
-    public static let liquidStyle: NSGlassEffectView.Style = .clear
+    public static let liquidStyle: NSGlassEffectView.Style = .regular
 
     public static var debugDescription: String {
         switch liquidStyle {
         case .clear: "Liquid Glass style = .clear（最透明）"
-        case .regular: "Liquid Glass style = .regular（标准）"
+        case .regular: "Liquid Glass style = .regular（标准，现行）"
         @unknown default: "Liquid Glass style = 未知(\(liquidStyle.rawValue))"
         }
     }

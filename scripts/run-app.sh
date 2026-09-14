@@ -39,7 +39,7 @@ if [[ "$NO_BUILD" -eq 0 ]]; then
   "$ROOT/scripts/build-app.sh" "$CONFIG"
 fi
 
-APP="$ROOT/build/NotchSwitch.app"
+APP="$HOME/Library/Developer/NotchSwitch/build/NotchSwitch.app"
 if [[ ! -d "$APP" ]]; then
   echo "构建产物不存在: $APP" >&2
   exit 1
@@ -56,9 +56,9 @@ if [[ "$INSTALL" -eq 1 ]]; then
   # 同一个 bundle id 存在两份时，LaunchServices 可能解析到旧路径（实测踩中：
   # 明明 open 的是 /Applications，实际跑起来的是 build/ 里那份）。
   # TCC 授权是「路径 + 签名」绑定的，两个位置各记一套，必然混乱。
-  rm -rf "$ROOT/build/NotchSwitch.app"
+  rm -rf "$APP"
   APP="$TARGET"
-  echo "    已移除 build/ 副本，保证只有 /Applications 一个位置"
+  echo "    已移除构建目录副本，保证只有 /Applications 一个位置"
 fi
 
 echo "==> 结束已运行的实例"

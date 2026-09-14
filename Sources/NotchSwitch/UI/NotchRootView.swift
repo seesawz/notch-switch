@@ -24,14 +24,13 @@ struct NotchRootView: View {
     /// = 卡片 132 + 上下内边距 16（已移除 footer，见 §6.1）
     private let contentHeight: CGFloat = 148
 
-    /// 预览带外形：顶部与刘海齐平，只有下面两角有圆角
-    private let stripShape = UnevenRoundedRectangle(
-        topLeadingRadius: 0,
-        bottomLeadingRadius: 20,
-        bottomTrailingRadius: 20,
-        topTrailingRadius: 0,
-        style: .continuous
-    )
+    /// 预览带圆角：四角统一，由 `NSGlassEffectView` 以同一半径**原生**渲染（ADR-041）。
+    /// 之前是「上平下圆」异形 + clipShape 硬裁，圆角处边缘光被切掉，背景看着像拼接。
+    private let stripCornerRadius: CGFloat = 20
+
+    private var stripShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: stripCornerRadius, style: .continuous)
+    }
 
     private let cardImageShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
@@ -92,12 +91,62 @@ struct NotchRootView: View {
         // 外层的淡出+缩放只作用于玻璃胶囊本身。
         .opacity(metrics.isExpanded ? 1 : 0)
         .animation(metrics.isExpanded ? contentAnimation : .linear(duration: 0), value: metrics.isExpanded)
-        .kimiGlass(in: stripShape, display: display)
+        .kimiGlass(in: stripShape, display: display, cornerRadius: stripCornerRadius) {
+            stripContent
+        }
         .overlay {
-            stripShape.strokeBorder(
-                Kimi.borderColor(contrast: display.increaseContrast),
-                lineWidth: Kimi.borderWidth(contrast: display.increaseContrast)
-            )
+            if display.increaseContrast {
+                // 增强对比度（ADR-034 "bolder lines"）：全周加粗描边，轮廓处处可辨
+                stripShape.strokeBorder(
+                    Kimi.borderColor(contrast: true),
+                    lineWidth: Kimi.borderWidth(contrast: true)
+                )
+            } else {
+                // 常规态只描两侧+底部：顶边是玻璃与刘海/菜单栏的交界线，
+                // 在那里描边等于在焊缝上再画一条线（ADR-041）；顶部轮廓交给玻璃自身 rim
+                StripEdgeStroke(radius: stripCornerRadius)
+                    .stroke(
+                        Kimi.borderColor(contrast: false),
+                        lineWidth: Kimi.borderWidth(contrast: false)
+                    )
+            }
+        }
+    }
+
+    /// 预览带内容（嵌进玻璃 `contentView`，见 ADR-040）。
+    private var stripContent: some View {
+        VStack(spacing: 0) {
+            if windowList.windows.isEmpty {
+                emptyState
+            } else {
+                cardRow
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 灵动岛式收起：内容在收起开始的**一帧内**消失，只留空玻璃胶囊缩回刘海。
+        // 预览图跟着面板一起缩会在亮色窗口上闪白（实测），所以内容不参与收起动画；
+        // 外层的淡出+缩放只作用于玻璃胶囊本身。
+        .opacity(metrics.isExpanded ? 1 : 0)
+        .animation(metrics.isExpanded ? contentAnimation : .linear(duration: 0), value: metrics.isExpanded)
+    }
+
+    /// 只描「两侧 + 底部」的开口描边（ADR-041）：不闭口，顶边不画线。
+    private struct StripEdgeStroke: Shape {
+        var radius: CGFloat
+
+        func path(in rect: CGRect) -> Path {
+            let r = min(radius, rect.width / 2, rect.height / 2)
+            var p = Path()
+            p.move(to: CGPoint(x: rect.minX, y: rect.minY + r))
+            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - r))
+            p.addArc(center: CGPoint(x: rect.minX + r, y: rect.maxY - r), radius: r,
+                     startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true)
+            p.addLine(to: CGPoint(x: rect.maxX - r, y: rect.maxY))
+            p.addArc(center: CGPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r,
+                     startAngle: .degrees(90), endAngle: .degrees(0), clockwise: true)
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + r))
+            return p
         }
     }
 
@@ -177,8 +226,10 @@ struct NotchRootView: View {
                     .resizable()
                     .frame(width: 14, height: 14)
                     .padding(5)
+                    // 同源面材（ADR-041）：.ultraThinMaterial 是窗内采样材质，
+                    // 叠在 Liquid Glass 上会显成灰色补丁；图标角标改用纯色低透明底
                     .background(
-                        .ultraThinMaterial,
+                        Color.black.opacity(0.45),
                         in: RoundedRectangle(cornerRadius: 7, style: .continuous)
                     )
                     .padding(6)

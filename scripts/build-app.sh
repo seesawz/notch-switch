@@ -20,7 +20,11 @@ cd "$ROOT"
 source "$ROOT/scripts/signing.conf"
 
 APP_NAME="NotchSwitch"
-BUILD_DIR="$ROOT/build"
+# 构建产物放 ~/Library/Developer 而不是项目目录：
+# ~/Library 默认不被 Spotlight 索引；放项目里会多出一个能被 Spotlight/启动台
+# 搜到的 NotchSwitch.app（实测踩中：与 /Applications 的正主并列出现）。
+# SwiftPM 的 .build/ 以点开头天然不被索引，只有这里组装的 .app 需要挪。
+BUILD_DIR="$HOME/Library/Developer/NotchSwitch/build"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
 
 echo "==> swift build -c $CONFIG"

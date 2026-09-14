@@ -2,15 +2,15 @@ import AppKit
 import NotchKit
 import SwiftUI
 
-/// 面板背景：**采样窗口背后内容**的玻璃。
+/// 面板玻璃容器：**采样窗口背后内容**的玻璃，内容嵌在玻璃里（`contentView`）。
 ///
-/// 四个约束必须同时成立，少一个就会出现「透视不对」或「玻璃消失」：
+/// 五个约束必须同时成立，少一个就会出现「透视不对」或「玻璃消失」：
 ///
 /// 1. **必须走 AppKit 的 behind-window 路线。**
 ///    SwiftUI 的 `.ultraThinMaterial` / `.glassEffect` 采样的是**窗口内部**内容，
 ///    而本面板是透明浮层、窗内除预览带外什么都没有 —— 它们只能折射一片空白。
 ///
-/// 2. **`NSVisualEffectView` 必须显式 `state = .active`。**
+/// 2. **`NSVisualEffectView` 回退必须显式 `state = .active`。**
 ///    默认 `.followsWindowActiveState` 下，Agent App 几乎永远「不活跃」
 ///    （面板是 `nonactivatingPanel`，点击都不会激活自己），材质会渲染成平坦的非活跃外观。
 ///
@@ -19,58 +19,69 @@ import SwiftUI
 ///
 /// 4. **面板必须是 key window，玻璃才渲染（ADR-037）。**
 ///    实测（`scripts/glass_probe.swift`）：`NSGlassEffectView` 在窗口非 key 时
-///    渲染成平坦暗色贴片，背后内容完全不折射 —— 表现为「只有点击卡片时玻璃才闪现」
-///    （mouse-down 瞬间面板短暂成为 key，激活目标 App 后又被夺走）。
-///    覆写 `isKeyWindow` 对外说谎无效，必须真正持有 key。
-///    由 `NotchPanelController` 的 `holdKeyForLiquidGlass()` / `releaseKey()` 负责，
-///    本视图无法自行控制（`NSGlassEffectView` 没有 `state` 属性可设）。
+///    渲染成平坦暗色贴片。由 `NotchPanelController` 的
+///    `holdKeyForLiquidGlass()` / `releaseKey()` 负责，本视图无法自行控制。
 ///
-/// 材质种类**不由这里决定** —— 它来自 `GlassMaterialPolicy`（读系统设置 + 系统版本）。
-/// 本视图只负责把已经决定好的材质渲染出来。
-struct GlassSurface: NSViewRepresentable {
-
+/// 5. **内容放进 `NSGlassEffectView.contentView`（ADR-040，Apple 官方用法）。**
+///    系统把 `contentView` 当作「玻璃上的内容」与玻璃统一渲染——玻璃负责背景
+///    对比度，前景可读性由系统一并调节；之前内容只是叠在玻璃上面的独立 SwiftUI
+///    层，绕过了这套机制。头文件明言：只有 `contentView` 保证被放进玻璃效果内，
+///    任意子视图不保证。
+///
+/// 6. **圆角必须由玻璃原生渲染（ADR-041）。**
+///    玻璃的边缘光（rim）沿它**自己**的圆角路径画。若 `cornerRadius = 0` 再靠外层
+///    `clipShape` 硬裁出异形，圆角处的边缘光会被切掉——直边有光、圆角无光，
+///    背景看起来就像几块拼起来的。`NSGlassEffectView` 只支持四角统一圆角，
+///    顶部两角因此从方改圆（代价见 ADR-041）。
+///
+/// 材质种类来自 `GlassMaterialPolicy`，样式来自 `GlassStylePolicy`，本视图不决策。
+struct GlassSurface<Content: View>: NSViewRepresentable {
     var material: GlassMaterial
-    var tint: Color?
+    /// 玻璃自绘圆角半径（四角统一，见头注释约束 6）。
+    var cornerRadius: CGFloat = 0
+    @ViewBuilder var content: () -> Content
 
     func makeNSView(context: Context) -> NSView {
-        switch material {
-        case .liquidGlass:
-            if #available(macOS 26.0, *) { return NSGlassEffectView() }
-            return NSVisualEffectView()   // 理论上到不了：policy 已按版本判定
-        case .vibrancy:
-            return NSVisualEffectView()
-        case .opaque:
-            // .opaque 由 SwiftUI 侧用系统窗口背景色直接填充（见 KimiTheme.kimiGlass），
-            // 不走 AppKit，避免多一层图层。
-            return NSView()
-        }
-    }
+        let hosting = NSHostingView(rootView: content())
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        configure(nsView)
-    }
-
-    private func configure(_ nsView: NSView) {
-        if #available(macOS 26.0, *), let glass = nsView as? NSGlassEffectView {
-            // 取最透明的一档（`.clear`，见 GlassStylePolicy 的取舍说明）：
-            // 系统那个「透明 / 着色」开关没有公开读取 API，读不到就按最透明来。
+        if #available(macOS 26.0, *), material == .liquidGlass {
+            let glass = NSGlassEffectView()
             glass.style = GlassStylePolicy.liquidStyle
-            // 圆角交给 SwiftUI 的 clipShape：预览带是「上面两角方、下面两角圆」的不规则形状，
-            // 而 cornerRadius 只能给统一圆角。
-            glass.cornerRadius = 0
-            if let tint {
-                glass.tintColor = NSColor(tint)
-            }
-            return
+            // 圆角必须原生渲染（约束 6 / ADR-041）：clipShape 硬裁会切掉圆角处的边缘光
+            glass.cornerRadius = cornerRadius
+            glass.contentView = hosting
+            return glass
         }
 
-        guard let effect = nsView as? NSVisualEffectView else { return }
-        // `.popover` = 「浮在其它内容之上的浮层」，是与本面板语义最接近、且比 `.hudWindow` 更透的材质。
-        // 注意：这条回退分支只在 macOS 26 以下生效，本机（26/27）走的是 Liquid Glass，
-        // **该材质在本机无法实测**，属未经真机验证的选择。
+        // macOS 26 以下回退：经典毛玻璃（behind-window 采样）。
+        // `.popover` = 「浮在其它内容之上的浮层」，语义最贴近且比 `.hudWindow` 更透。
+        // 该分支本机无法实测，属未经真机验证的选择。
+        let effect = NSVisualEffectView()
         effect.material = .popover
         effect.blendingMode = .behindWindow   // ← 约束 1
         effect.state = .active                // ← 约束 2
         effect.isEmphasized = false
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(hosting)
+        NSLayoutConstraint.activate([
+            hosting.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
+            hosting.topAnchor.constraint(equalTo: effect.topAnchor),
+            hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
+        ])
+        return effect
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if #available(macOS 26.0, *), let glass = nsView as? NSGlassEffectView {
+            glass.style = GlassStylePolicy.liquidStyle
+            glass.cornerRadius = cornerRadius
+            (glass.contentView as? NSHostingView<Content>)?.rootView = content()
+            return
+        }
+        if let effect = nsView as? NSVisualEffectView,
+           let hosting = effect.subviews.compactMap({ $0 as? NSHostingView<Content> }).first {
+            hosting.rootView = content()
+        }
     }
 }
