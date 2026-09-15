@@ -48,6 +48,8 @@
 | 2026-09-14 | v0.26 | **玻璃改回「50% 透明度」**：v0.23 的纯 `.clear` 在浅色背景下标题几乎不可读（ADR-035 预留的可读性信号实测触发）。不解回 `.regular`（系统档位不透明度不可控），改为在玻璃上叠 50% 窗口背景色（`Kimi.glassVeilOpacity`，浅色≈白、深色≈黑自动跟随）：折射质感保留、文字可读、精确 50%。新增 ADR-038。另：构建产物移出项目目录（`build/` 会被 Spotlight 索引，出现第二个可搜到的 NotchSwitch.app），改放 `~/Library/Developer/NotchSwitch/build` |
 | 2026-09-14 | v0.27 | **玻璃样式 `.clear` → `.regular`**（ADR-039）：用户看过 50% 透明度版本后选择系统菜单栏那种更浓的玻璃感。`.regular` + 50% 底色叠加；若太厚调 `Kimi.glassVeilOpacity`（可降为 0）或回 `.clear` |
 | 2026-09-14 | v0.28 | **修「背景像拼接的而不是一体的」**：三处来源一次消除——① 描边 `strokeBorder` 沿闭合路径连顶边一起描，正好压在玻璃与菜单栏/刘海的交界线上，与玻璃自身 rim 叠成「焊缝双线」：常规态改 `StripEdgeStroke` 开口路径只描两侧+底部，增强对比度态保留全周描边（ADR-034 优先）；② 圆角改由 `NSGlassEffectView` 以 `cornerRadius` **原生渲染**（统一 20pt 含顶部两角，Liquid Glass 分支不再 clipShape，contentView 随玻璃统一取形）；③ 卡片图标角标 `.ultraThinMaterial`（窗内采样）在玻璃上显灰补丁，改纯色低透明底。装新版后自截图+局部 4× 放大验证：边缘光顺圆角连续、顶边无双线。新增 ADR-041 |
+| 2026-09-15 | v0.29 | **修「悬停高亮没有顶边」**：悬停放大 `scaleEffect(1.03)` 以卡片中心放大，外溢的 ~2pt 被 `cardRow` 的 `.clipped()` 裁掉，而缩略图顶边描边（`strokeBorder` 内描 1.5pt）恰好整条在那 2pt 里——表现为蓝框只有三边。裁切上移到 `stripContent` 层（上下各留 8pt 内边距），放大外溢与阴影留在框内；水平方向同宽，滚出面板的卡片照旧被切。底部三边不受影响的原因：缩略图底边距卡片裁切线还有标题行 ~20pt 余量 |
+| 2026-09-15 | v1.0 | **首个正式版**：版本号 0.1.0 → 1.0；新增 App 图标（`scripts/make-icon.swift` 程序化绘制，刘海 + 预览带 + 悬停蓝框元素）并接入 `build-app.sh`；新增 `scripts/package-release.sh` 打 DMG（App + /Applications 软链）；README 面向发布整理（删未完成清单与路线图，补 DMG 下载安装与 Gatekeeper 自签说明）；玻璃样式单测从 ADR-035（`.clear`）更新为 ADR-039（`.regular`）现行行为，39 项全绿 |
 
 ---
 
