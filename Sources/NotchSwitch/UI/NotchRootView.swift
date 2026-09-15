@@ -124,6 +124,9 @@ struct NotchRootView: View {
         }
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 裁切在这一层而不是 cardRow 上：这里上下各有 8pt 内边距，悬停放大外溢的
+        // ~2pt 与阴影留在框内；水平方向与 cardRow 同宽，滚出面板的卡片照旧被切掉。
+        .clipped()
         // 灵动岛式收起：内容在收起开始的**一帧内**消失，只留空玻璃胶囊缩回刘海。
         // 预览图跟着面板一起缩会在亮色窗口上闪白（实测），所以内容不参与收起动画；
         // 外层的淡出+缩放只作用于玻璃胶囊本身。
@@ -163,7 +166,9 @@ struct NotchRootView: View {
         .padding(.horizontal, horizontalPadding)
         .offset(x: -selection.offset)
         .frame(width: metrics.expandedSize.width, alignment: .leading)
-        .clipped()
+        // 不在这里 .clipped()：本视图边界正好贴着卡片，悬停放大（1.03）外溢的 ~2pt
+        // 会被裁掉，缩略图顶边描边恰好整条在那 2pt 里（表现为「悬停高亮没有顶边」）。
+        // 裁切统一放在 stripContent 层，那里上下各留了 8pt。
     }
 
     private func card(for window: WindowInfo) -> some View {
