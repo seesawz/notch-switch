@@ -195,14 +195,15 @@ final class GlassMaterialPolicyTests: XCTestCase {
         )
     }
 
-    /// 系统 Liquid Glass 的「透明 / 着色」没有公开读取 API，读不到就固定取最透明的一档。
-    /// 钉住它，避免以后有人「顺手」改回 `.regular` 而没人知道为什么。
+    /// 玻璃样式档位是用户看过两版后主动选定的（ADR-039 推翻 ADR-035）：
+    /// `.regular`（系统菜单栏那种较浓的玻璃感）+ 50% 底色叠加。
+    /// 钉住它，避免以后有人「顺手」改档而没人知道为什么。
     @available(macOS 26.0, *)
-    func testLiquidGlassUsesMostTransparentStyle() {
+    func testLiquidGlassUsesRegularStyle() {
         XCTAssertEqual(
             GlassStylePolicy.liquidStyle,
-            .clear,
-            "读不到系统设置时按最透明来（ADR-035）"
+            .regular,
+            "ADR-039：可读性优先，.regular + 50% 底色（Kimi.glassVeilOpacity）；嫌厚先调 veil 再考虑回 .clear"
         )
     }
 
