@@ -95,9 +95,8 @@ public final class NotchPanelController {
 
         refreshScreen()
         applyFrame(for: .collapsed, transition: .immediate)
-        // 显式设置一次层级，不依赖「守卫状态发生变化」这个前提
+        // 收起态不归位：面板默认离屏（见 applyFrame）
         applyLevel()
-        panel.orderFrontRegardless()
 
         Log.panel.notice(
             """
@@ -203,6 +202,8 @@ public final class NotchPanelController {
         }
         cancelPendingCollapse()
         state = .expanded
+        // 收起态面板已彻底离屏省内存（见 applyFrame 的注释），展开先归位
+        panel.orderFrontRegardless()
         panel.ignoresMouseEvents = false
         holdKeyForLiquidGlass()
         let transition = effectiveTransition(.expand)
@@ -330,8 +331,12 @@ public final class NotchPanelController {
         case .none:
             isSuspended = false
             applyLevel()
-            panel.orderFrontRegardless()
-            Log.panel.notice("恢复常驻最前台（level=\(self.panel.level.rawValue, privacy: .public)）")
+            // 只在展开态归位：收起态面板是离屏的（省内存），把不相干的状态变化
+            // （切 Space 等）都重新归位会让「离屏」优化失效
+            if state == .expanded {
+                panel.orderFrontRegardless()
+            }
+            Log.panel.notice("恢复常驻最前台（level=\(self.panel.level.rawValue, privacy: .public)，面板\(self.state == .expanded ? "在屏" : "离屏", privacy: .public)）")
         case .fullScreenApp:
             // 需求规定的唯一例外：全屏 App 就该挡住我们
             isSuspended = true
@@ -431,6 +436,7 @@ public final class NotchPanelController {
         guard transition != .immediate else {
             panel.setFrame(target, display: true)
             container.needsLayout = true
+            if state == .collapsed { panel.orderOut(nil) }
             return
         }
 
@@ -443,7 +449,19 @@ public final class NotchPanelController {
             )
             panel.animator().setFrame(target, display: true)
         } completionHandler: { [weak self] in
-            MainActor.assumeIsolated { self?.container.needsLayout = true }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.container.needsLayout = true
+                // 收起动画结束后**彻底离屏**：一个 772×181@2x 的透明窗口背后
+                // 也是一整块可绘制内存，而面板绝大多数时间处于收起态。离屏后
+                // backing 由系统回收、合成器不再为它画透明像素。悬停检测走
+                // 全局 mouseMoved（不依赖窗口在屏），展开时 orderFrontRegardless
+                // 归位，行为不变。
+                if self.state == .collapsed {
+                    self.panel.orderOut(nil)
+                    Log.panel.debug("面板离屏（收起态省内存）")
+                }
+            }
         }
     }
 

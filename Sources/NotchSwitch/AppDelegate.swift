@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panelController?.stop()
         permissions.stop()
         windowList.stop()
+        thumbnails.stop()
         display.stop()
     }
 
@@ -311,6 +312,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         lines.append("已缓存 \(thumbnails.images.count) 张")
         lines.append("抓取中: \(thumbnails.isCapturing)")
         if let error = thumbnails.lastError { lines.append("错误: \(error)") }
+        lines.append("")
+        lines.append("== 内存 ==")
+        lines.append("进程物理占用 (phys_footprint): \(MemoryInfo.physicalFootprintDescription())")
         lines.append("")
         lines.append("== 系统显示选项 ==")
         lines.append(display.debugDescription)
