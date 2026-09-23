@@ -56,6 +56,8 @@ public final class HoverMonitor {
         localMonitor = nil
         safetyTimer?.invalidate()
         safetyTimer = nil
+        // 重置判定状态：stop 后 restart 不应带着上次的进出结论
+        isInside = false
     }
 
     private func handleMouseMoved() {

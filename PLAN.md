@@ -5,8 +5,8 @@
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | v0.23（玻璃取最透明档） |
-| 最后更新 | 2026-09-14 |
+| 文档版本 | v1.0.2（守卫检测异步化） |
+| 最后更新 | 2026-09-23 |
 | 当前阶段 | M0~M3 已完成 · M4 部分完成（滚动已做，搜索待做） |
 | 目标平台 | macOS 14+（Apple Silicon 优先，Intel 尽力兼容） |
 | 开发环境（本机实测） | macOS 27.0 (26A428) / Xcode 26.3 / Swift 6.2.4 |
@@ -51,6 +51,7 @@
 | 2026-09-15 | v0.29 | **修「悬停高亮没有顶边」**：悬停放大 `scaleEffect(1.03)` 以卡片中心放大，外溢的 ~2pt 被 `cardRow` 的 `.clipped()` 裁掉，而缩略图顶边描边（`strokeBorder` 内描 1.5pt）恰好整条在那 2pt 里——表现为蓝框只有三边。裁切上移到 `stripContent` 层（上下各留 8pt 内边距），放大外溢与阴影留在框内；水平方向同宽，滚出面板的卡片照旧被切。底部三边不受影响的原因：缩略图底边距卡片裁切线还有标题行 ~20pt 余量 |
 | 2026-09-15 | v1.0 | **首个正式版**：版本号 0.1.0 → 1.0；新增 App 图标（`scripts/make-icon.swift` 程序化绘制，刘海 + 预览带 + 悬停蓝框元素）并接入 `build-app.sh`；新增 `scripts/package-release.sh` 打 DMG（App + /Applications 软链）；README 面向发布整理（删未完成清单与路线图，补 DMG 下载安装与 Gatekeeper 自签说明）；玻璃样式单测从 ADR-035（`.clear`）更新为 ADR-039（`.regular`）现行行为，39 项全绿 |
 | 2026-09-15 | v1.0.1 | **修「其他 App 全屏后面板仍能展开」**：实测（macOS 26/27，双屏机）稳态全屏下两个检测器都会漏判——CGWindowList 里全屏窗口不覆盖菜单栏条（`(0,菜单栏高,屏宽,屏高-菜单栏高)`，与最大化窗口同形，另有 layer 500 跨屏容器），AX 报**还原前** frame 且 subrole 非 `AXFullScreenWindow`（飞书实测 `AXUnknown`）——旧启发式只在进出全屏动画瞬间偶尔命中，稳态「检测到→解除」反复横跳，解除空档里面板照常弹出甚至可点击切换。修复按「事件闩锁」重构（用户提出）：检测命中即置闩；解闩只发生在 space 变化的评估里（进入动画余波 2s 宽限期内不解；疑似退出动画延迟 0.6s 复核确认）；看门狗 miss 一律不解闩。决策逻辑抽成纯函数 `latchTransition`，8 项闩锁单测钉死。单测 39 → 47 项 |
+| 2026-09-23 | v1.0.2 | **代码审查后的三处优化（行为不变）**：① `LayerGuard` 的 AX/CG 检测挪到后台线程（ADR-042）——原看门狗每秒在主线程对全部常规应用做 AX IPC 扫描，单个挂死应用可借 0.4s messaging timeout 把主线程卡住，检测不碰 UI 无需在主线程；闩锁决策仍在主线程，`latchTransition` 纯函数与单测零改动，新增「在途合并队列」保证同时只一发检测且 space 变化永不丢失。② 修 `NotchRootView.strip` 死前缀：`kimiGlass` 扩展不消费被修饰视图，之前挂在 `.kimiGlass` 前面的整条 VStack（含卡片行）每次渲染白算一遍且改动不可见，改为 `Color.clear` 占位。③ 清理死代码：删 `ThumbnailStore.invalidateAll`、`MRUOrder.remove`、`NotchPanelController.isHoverSuspended`；`PanelTransition.animatesContent`（v0.17 后已与实际行为脱节）加历史标注；`PanelSelection` 的 `firstVisibleIndex`/`visibleRange`/`step` 标注「F8 预留」；顺手修 `stop()` 不取消待决收起、`HoverMonitor.stop()` 不重置进出状态两个卫生问题。单测 47 项不变、全绿 |
 
 ---
 
@@ -755,6 +756,7 @@ offset += (target - offset) × (1 − exp(−dt / τ))      τ = 0.035s
 | ADR-038 | `.clear` 玻璃上叠 **50% 窗口背景色**（`Kimi.glassVeilOpacity`），达到「50% 透明度」，不回退 `.regular` | ADR-035 预留的「可读性变差即回退」信号实测触发：浅色背景下纯 `.clear` 上单行标题几乎不可读。但 `.regular` 的不透明度是系统内定档位，无法精确到 50%；改为玻璃上叠 50% `windowBackgroundColor`（浅色≈白、深色≈黑，自动跟随模式），折射质感保留、文字可读、透明度精确可控。叠层必须盖在玻璃**上面**而不是画进 GlassSurface：NSGlassEffectView 的折射由 WindowServer 合成，画在玻璃视图内部的颜色会被一起折射掉，只有盖在上面才能稳定把背景变实 | 2026-09-14 |
 | ADR-039 | 玻璃样式 `.clear` → `.regular`（系统菜单栏那种更浓的玻璃感），与 ADR-038 的 50% 底色叠加 | 用户看过 ADR-038 效果后主动选择更浓的观感。`.regular` 是系统「Standard glass effect style」，底色叠加与样式档位正交：嫌太厚先调 `Kimi.glassVeilOpacity`（可降为 0），再考虑回 `.clear`。ADR-035「固定取 .clear」的决定就此推翻，可读性信号的处理路径最终落在「样式换档 + 底色叠加」而非单一手段 | 2026-09-14 |
 | ADR-041 | **玻璃圆角由 `NSGlassEffectView` 原生渲染**（四角统一 20pt，含顶部两角）；常规态描边只走**两侧+底部**（`StripEdgeStroke` 开口路径，顶边不描）；玻璃上不再引入第二种材质系统 | 「背景像拼接」实测三个来源：① `strokeBorder` 沿闭合路径描边，顶边正好是玻璃与刘海/菜单栏的交界线，描边线与玻璃 rim 叠成焊缝——常规态开口路径跳过顶边；「增强对比度」开启时按 ADR-034 *"bolder lines"* 保留全周描边（无障碍优先于观感）。② 玻璃的边缘光（rim）沿它**自己**的圆角路径画，`cornerRadius=0` + `clipShape` 硬裁异形会把圆角处边缘光切掉（直边有光、圆角无光，剪纸感）——故圆角必须原生渲染。代价知情：`NSGlassEffectView` 只支持四角统一，顶部两角由方改圆，有刘海屏上玻璃与刘海两肩不再严丝合缝（留约 20pt 空隙，本机无刘海无法实测，同 ADR-035 的未验证项）。③ `.ultraThinMaterial` 窗内采样与主玻璃 behind-window 采样是两套系统，叠放显灰补丁——图标角标改纯色低透明底。验证：自截图局部 4× 放大，边缘光顺圆角连续无断点、顶边无双线 | 2026-09-14 |
+| ADR-042 | **`LayerGuard` 的全屏/模态检测在后台线程执行**，主线程只保留闩锁决策与状态广播；在途检测用合并队列去重（优先级：space 变化 > 退全屏复核 > 看门狗 tick），同时最多一发检测 | 检测本体（AX 逐应用读窗口表/subrole/frame + CGWindowList）是对每个常规应用的多轮 Mach IPC，且单应用设了 0.4s messaging timeout——一个挂死的应用就能让主线程每秒卡最多 0.4s，还会拖慢悬停/滚动的响应。检测不碰 UI，放主线程纯属浪费。改造后主线程每拍只做廉价取值（`NSScreen.screens`、常规应用 pid 列表，无 IPC），检测丢进 `Task.detached(.utility)`，结果回主线程走**同一套** `latchTransition`（纯函数与单测零改动）。检测输入（屏幕 frame、pid 列表）在主线程采集后传值——`NSScreen`/`NSWorkspace` 不是线程安全的，不能跨线程碰。合并队列的存在理由：异步化后检测结果会迟到，若无去重，看门狗 tick 与 space 通知可能并发提交两发、旧结果覆盖新结果；合并规则保证 space 变化永不丢失、复核语义不被看门狗冲掉（复核与看门狗跑同一检测函数，合并后结果等价）。`stop()` 后到达的检测结果直接丢弃（`isRunning` 门卫），并取消未决复核。代价知情：闩锁状态更新最多晚到一次检测时长（典型几 ms，挂死应用最坏几百 ms），对 1s 粒度的看门狗无感知差异 | 2026-09-23 |
 
 
 ---
@@ -908,7 +910,7 @@ offset += (target - offset) × (1 − exp(−dt / τ))      τ = 0.035s
 | 鼠标划到刘海没反应 | 日志里 `expand 被拒绝:` | 处于 `suspended`（全屏 / 系统弹窗）或已是展开态 |
 | 展开了但收不回去 | 调试面板的「悬停状态」「热区」 | 热区矩形算错；或全局 mouseMoved 丢事件（安全网应兜住） |
 | 悬停偶尔失灵 | 调试面板的「鼠标位置」vs「热区」 | 屏幕缩放/分辨率变化后几何未重算 |
-| 其他 App 全屏时还弹出来 | 日志 `检测到其他 App 全屏` | `LayerGuard.isFullScreenWindowActive` 启发式没命中（需换私有 API，见 Q7） |
+| 其他 App 全屏时还弹出来 | 日志 `检测到其他 App 全屏` | `LayerGuard.isFullScreenActive` 启发式没命中（需换私有 API，见 Q7） |
 | 授权对话框点不到 | 日志 `检测到系统模态弹窗` | `systemModalOwners` 名单没覆盖到该进程名，需补进 `LayerGuard` |
 | 每次重建都要重新授权 | `security find-identity -v -p codesigning` | 用的 ad-hoc 签名，先跑 `./scripts/setup-signing.sh` |
 | 开关是开的但仍报未授权 | 日志里 `权限未齐` 的那行 | TCC 记录与签名失配 → `./scripts/reset-permissions.sh`（详见 §14.7） |

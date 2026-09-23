@@ -76,41 +76,32 @@ struct NotchRootView: View {
 
     // MARK: - 预览带
 
+    // 注意：`kimiGlass` 不消费被修饰的视图（只用 shape + content 构造新视图），
+    // 所以这里必须用 `Color.clear` 占位、把真正的内容放进闭包。
+    // 之前在 .kimiGlass 前面挂了整条 VStack，那次构建的结果被整个丢弃——
+    // 卡片行每次渲染白算一遍，而且改动「看不见效果」，是标准的维护陷阱。
     private var strip: some View {
-        VStack(spacing: 0) {
-            if windowList.windows.isEmpty {
-                emptyState
-            } else {
-                cardRow
+        Color.clear
+            .kimiGlass(in: stripShape, display: display, cornerRadius: stripCornerRadius) {
+                stripContent
             }
-        }
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // 灵动岛式收起：内容在收起开始的**一帧内**消失，只留空玻璃胶囊缩回刘海。
-        // 预览图跟着面板一起缩会在亮色窗口上闪白（实测），所以内容不参与收起动画；
-        // 外层的淡出+缩放只作用于玻璃胶囊本身。
-        .opacity(metrics.isExpanded ? 1 : 0)
-        .animation(metrics.isExpanded ? contentAnimation : .linear(duration: 0), value: metrics.isExpanded)
-        .kimiGlass(in: stripShape, display: display, cornerRadius: stripCornerRadius) {
-            stripContent
-        }
-        .overlay {
-            if display.increaseContrast {
-                // 增强对比度（ADR-034 "bolder lines"）：全周加粗描边，轮廓处处可辨
-                stripShape.strokeBorder(
-                    Kimi.borderColor(contrast: true),
-                    lineWidth: Kimi.borderWidth(contrast: true)
-                )
-            } else {
-                // 常规态只描两侧+底部：顶边是玻璃与刘海/菜单栏的交界线，
-                // 在那里描边等于在焊缝上再画一条线（ADR-041）；顶部轮廓交给玻璃自身 rim
-                StripEdgeStroke(radius: stripCornerRadius)
-                    .stroke(
-                        Kimi.borderColor(contrast: false),
-                        lineWidth: Kimi.borderWidth(contrast: false)
+            .overlay {
+                if display.increaseContrast {
+                    // 增强对比度（ADR-034 "bolder lines"）：全周加粗描边，轮廓处处可辨
+                    stripShape.strokeBorder(
+                        Kimi.borderColor(contrast: true),
+                        lineWidth: Kimi.borderWidth(contrast: true)
                     )
+                } else {
+                    // 常规态只描两侧+底部：顶边是玻璃与刘海/菜单栏的交界线，
+                    // 在那里描边等于在焊缝上再画一条线（ADR-041）；顶部轮廓交给玻璃自身 rim
+                    StripEdgeStroke(radius: stripCornerRadius)
+                        .stroke(
+                            Kimi.borderColor(contrast: false),
+                            lineWidth: Kimi.borderWidth(contrast: false)
+                        )
+                }
             }
-        }
     }
 
     /// 预览带内容（嵌进玻璃 `contentView`，见 ADR-040）。

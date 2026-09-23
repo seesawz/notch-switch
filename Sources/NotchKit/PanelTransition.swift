@@ -41,6 +41,10 @@ public enum PanelTransition: Equatable {
         }
     }
 
-    /// 内容是否应该在这一档里淡出
+    /// 内容是否应该在这一档里淡出。
+    ///
+    /// ⚠️ 历史 API：v0.17 改「灵动岛式收起」后，内容在收起开始的**一帧内**消失，
+    /// 不再参与任何收起动画（见 NotchRootView.stripContent）。此属性已与实际行为脱节，
+    /// 仅存留以兼容旧单测断言，新代码不得依赖。
     public var animatesContent: Bool { self != .immediate }
 }

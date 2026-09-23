@@ -41,12 +41,14 @@ public final class PanelSelection: ObservableObject {
         max(0, CGFloat(max(0, totalCount - visibleCount)) * cardStride)
     }
 
-    /// 当前第一个可见窗口的索引
+    /// 当前第一个可见窗口的索引。
+    /// **F8 预留**（键盘/大预览导航未实现，PLAN.md §6.6）：目前只有单测在消费它。
     public var firstVisibleIndex: Int {
         guard totalCount > 0 else { return 0 }
         return min(max(0, follow.anchorIndex(stride: cardStride)), totalCount - 1)
     }
 
+    /// **F8 预留**（同 `firstVisibleIndex`）。
     public var visibleRange: Range<Int> {
         let start = firstVisibleIndex
         return start..<min(totalCount, start + visibleCount)
@@ -68,7 +70,7 @@ public final class PanelSelection: ObservableObject {
         startTicking()
     }
 
-    /// 逐张步进（键盘 / 以后的大预览导航用）
+    /// 逐张步进（**F8 预留**：键盘 / 以后的大预览导航用）
     public func step(_ direction: Int, totalCount: Int) {
         scroll(by: CGFloat(direction) * cardStride, totalCount: totalCount)
     }

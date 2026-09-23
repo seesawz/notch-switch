@@ -43,11 +43,6 @@ public final class ThumbnailStore: ObservableObject {
         recency.removeAll { $0 == windowID }
     }
 
-    public func invalidateAll() {
-        images.removeAll()
-        recency.removeAll()
-    }
-
     // MARK: - 捕获
 
     private func capture(_ windows: [WindowInfo]) async {

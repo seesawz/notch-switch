@@ -17,10 +17,6 @@ public struct MRUOrder {
         order.insert(windowID, at: 0)
     }
 
-    public mutating func remove(_ windowID: CGWindowID) {
-        order.removeAll { $0 == windowID }
-    }
-
     /// 清掉已经不存在的窗口，避免列表无限增长
     public mutating func prune(keeping valid: Set<CGWindowID>) {
         order.removeAll { !valid.contains($0) }

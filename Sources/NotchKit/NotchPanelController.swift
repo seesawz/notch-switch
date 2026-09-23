@@ -83,9 +83,6 @@ public final class NotchPanelController {
         hostingView.rootView = view
     }
 
-    /// 当前是否因为「全屏 / 系统弹窗」而停摆
-    public var isHoverSuspended: Bool { isSuspended }
-
     public var isExpanded: Bool { state == .expanded }
 
     // MARK: - 生命周期
@@ -139,6 +136,7 @@ public final class NotchPanelController {
     }
 
     public func stop() {
+        cancelPendingCollapse()
         hover.stop()
         layerGuard.stop()
         if let observer = screenObserver {
