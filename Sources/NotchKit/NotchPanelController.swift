@@ -42,6 +42,18 @@ public final class NotchPanelController {
     /// 返回是否消费掉这次滚动（返回 `false` 时事件会继续传递，不会被面板吞掉）。
     public var onScroll: ((CGFloat) -> Bool)?
 
+    /// 展开态下面板持有 key 时收到的键盘命令（F8 基础导航）。
+    /// 语义由外部实现（AppDelegate）：←→ 移动选中、Return 打开、Esc 逐级收起。
+    public enum KeyboardCommand: Equatable {
+        /// 选中移动 ±1（←/↑ 为 -1，→/↓ 为 +1）
+        case move(Int)
+        /// Return：打开当前聚焦的窗口
+        case activate
+        /// Esc：第一档隐大预览，第二档收面板（由外部按状态决定）
+        case escape
+    }
+    public var onKeyboard: ((KeyboardCommand) -> Void)?
+
     /// 系统「减弱动态效果」是否开启。开启时展开/收起不做动画 ——
     /// Apple 对该选项的要求是 *"UI should avoid large animations"*。
     /// 由 `SystemDisplayOptions` 在运行时注入，不在这里读系统值。
@@ -68,8 +80,16 @@ public final class NotchPanelController {
     private var collapseWorkItem: DispatchWorkItem?
     private var screenObserver: NSObjectProtocol?
     private var scrollMonitor: Any?
+    /// 键盘监听（F8）：展开态且面板持有 key（ADR-037）时接管 ←→/Return/Esc
+    private var keyMonitor: Any?
     /// 监听面板 key 被系统转移（如点击卡片后目标 App 激活），展开中则夺回，维持液态玻璃
     private var keyObserver: NSObjectProtocol?
+
+    // MARK: 大预览（F4）
+    /// 大预览是否可见
+    private var isPreviewVisible = false
+    /// 大预览使面板内容增高的总量（间隙 + 卡高，由 `setPreview` 传入）
+    private var previewExtraHeight: CGFloat = 0
 
     public init(rootView: AnyView, metrics: NotchMetrics = NotchMetrics()) {
         self.metrics = metrics
@@ -119,6 +139,7 @@ public final class NotchPanelController {
             self?.onScroll?(contentOffset) ?? false
         }
         installScrollMonitor()
+        installKeyMonitor()
 
         layerGuard.screenProvider = { [weak self] in self?.screen }
         layerGuard.onChange = { [weak self] blocker in self?.handleBlocker(blocker) }
@@ -151,6 +172,10 @@ public final class NotchPanelController {
             NSEvent.removeMonitor(monitor)
         }
         scrollMonitor = nil
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        keyMonitor = nil
         panel.orderOut(nil)
     }
     /// 滚动监听（PLAN.md §6.5 / ADR-010）。
@@ -183,6 +208,55 @@ public final class NotchPanelController {
             }
             return consumed ? nil : event   // 已消费则不再向下传递
         }
+    }
+
+    /// 键盘监听（F8）。只在「面板展开且持有 key」时接管——
+    /// 展开 = key（ADR-037），所以普通键盘输入不影响前台 App；
+    /// 反过来，引导/调试窗口持 key 时面板不是 key，这里自动让路。
+    /// 只消费无修饰键的箭头/Return/Esc，其余（⌘Tab 热键、输入法等）原样放行。
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let keyCode = event.keyCode
+            // 箭头键自带 .function 标志位，必须放行；⌘/⌥/⌃/⇧ 修饰的组合一律不接管
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                .subtracting([.capsLock, .numericPad, .function])
+            guard modifiers.isEmpty else { return event }
+
+            let command: KeyboardCommand?
+            switch keyCode {
+            case 123, 126: command = .move(-1)   // ← / ↑
+            case 124, 125: command = .move(1)    // → / ↓
+            case 36, 76: command = .activate     // Return / 小键盘 Enter
+            case 53: command = .escape
+            default: command = nil
+            }
+            guard let command else { return event }
+
+            let handled = MainActor.assumeIsolated {
+                guard self.state == .expanded, self.panel.isKeyWindow else { return false }
+                self.onKeyboard?(command)
+                return true
+            }
+            return handled ? nil : event
+        }
+    }
+
+    // MARK: - 大预览（F4）
+
+    /// 大预览显隐。预览可见时面板内容向下长出预览卡（高度由 `extraHeight` 给出，
+    /// = `LargePreviewLayout.panelExtraHeight` 的结果），宽度不变。
+    /// frame 与 SwiftUI 内容用同一档位动画，与 ADR-027 同一个道理。
+    public func setPreview(visible: Bool, extraHeight: CGFloat) {
+        guard isPreviewVisible != visible || abs(previewExtraHeight - extraHeight) > 0.5 else { return }
+        isPreviewVisible = visible
+        previewExtraHeight = extraHeight
+        let transition = effectiveTransition(visible ? .expand : .collapseHover)
+        metrics.setPreview(visible: visible, extraHeight: extraHeight, transition: transition)
+        guard state == .expanded else { return }
+        applyFrame(for: .expanded, transition: transition)
+        Log.panel.debug("大预览 → \(visible ? "显示" : "隐藏", privacy: .public) 增高=\(Double(extraHeight), privacy: .public)")
     }
 
     // MARK: - 手动控制（菜单栏用）
@@ -396,7 +470,8 @@ public final class NotchPanelController {
             width: min(expandedWidthLimit, available),
             height: topInset + contentHeight
         )
-        container.contentSize = expandedSize
+        // 用含预览增高的完整尺寸（预览不可见时等于 expandedSize，两个调用点都紧跟 collapse）
+        container.contentSize = currentExpandedSize
 
         metrics.update(
             topInset: topInset,
@@ -406,9 +481,10 @@ public final class NotchPanelController {
     }
 
     /// 收起 / 展开的目标 frame：**上沿与水平中心恒定**，只改变宽高 → 视觉上从刘海长出来。
+    /// 展开高度包含大预览的额外高度（不可见时为 0）。
     private func targetFrame(for state: State) -> CGRect {
         let size = state == .expanded
-            ? expandedSize
+            ? currentExpandedSize
             : CGSize(width: notchFrame.width, height: notchFrame.height)
         return CGRect(
             x: notchFrame.midX - size.width / 2,
@@ -424,8 +500,14 @@ public final class NotchPanelController {
         reduceMotion ? .immediate : transition
     }
 
+    /// 展开尺寸（含大预览增高）。所有「展开态面板应该多大」的判断都走这里，
+    /// 避免基础尺寸与预览增高两套账。
+    private var currentExpandedSize: CGSize {
+        CGSize(width: expandedSize.width, height: expandedSize.height + previewExtraHeight)
+    }
+
     private func applyFrame(for state: State, transition: PanelTransition) {
-        container.contentSize = expandedSize
+        container.contentSize = currentExpandedSize
         let target = targetFrame(for: state)
 
         guard transition != .immediate else {
@@ -475,6 +557,7 @@ public final class NotchPanelController {
         挂起: \(isSuspended)  守卫: \(layerGuard.blocker)
         热区: \(currentHotZone()?.debugString ?? "nil（无刘海且已按设置禁用）")
         无刘海顶部触发: \(hoverWithoutNotch ? "开" : "关")
+        大预览: \(isPreviewVisible ? "显示（增高 \(Int(previewExtraHeight))pt）" : "隐藏")
         鼠标位置: \(NSEvent.mouseLocation.debugString)
         自身窗口: \(ownWindowPresented)
         悬停状态: \(hover.debugState)

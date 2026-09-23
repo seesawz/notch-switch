@@ -75,6 +75,21 @@ public final class PanelSelection: ObservableObject {
         scroll(by: CGFloat(direction) * cardStride, totalCount: totalCount)
     }
 
+    /// 键盘导航（F8）：确保第 `index` 张卡完整可见。已可见则不动（不产生多余位移）。
+    /// 位移走 `scroll(by:)` 的帧同步跟随，所以是平滑滚动而不是瞬移。
+    public func ensureVisible(index: Int, totalCount: Int) {
+        self.totalCount = totalCount
+        let desired = follow.targetToShow(
+            index: index,
+            stride: cardStride,
+            visibleCount: visibleCount,
+            maxOffset: maxOffset
+        )
+        let delta = desired - follow.target
+        guard abs(delta) > 0.5 else { return }
+        scroll(by: delta, totalCount: totalCount)
+    }
+
     public func reset() {
         follow.reset()
         offset = 0

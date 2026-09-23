@@ -24,8 +24,10 @@ public final class ThumbnailStore: ObservableObject {
     /// 缩略图多旧算过期（秒）。收起后的补拍会重抓「缺失 + 过期」的窗口。
     /// 置 0 = 每次补拍都全量重抓（面板快速开关也不会反复抓，因为请求只在收起时来）。
     public var staleInterval: TimeInterval = 10
-    /// 缩略图宽度（像素）：卡片 176pt 宽，Retina 下取 352
-    private let thumbnailPixelWidth = 352
+    /// 缩略图宽度（像素）。卡片 176pt 在 2x 屏需 352；取一倍的压缩不够大预览用，
+    /// 故取 704（= 2× 卡片宽 = 1.1× 预览最大宽 640pt）：卡片与大预览共用同一份图，
+    /// 不另存第二套。32 张 × ~1.2MB ≈ 40MB，仍在 §4.10 的 64MB 缓存预算内（ADR-045）。
+    private let thumbnailPixelWidth = 704
 
     private var recency: [CGWindowID] = []
     /// 每张缓存图的抓取时刻，与 `images` 同步增删

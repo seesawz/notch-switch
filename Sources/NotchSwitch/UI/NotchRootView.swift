@@ -14,10 +14,14 @@ struct NotchRootView: View {
     @ObservedObject var windowList: WindowListModel
     @ObservedObject var thumbnails: ThumbnailStore
     @ObservedObject var selection: PanelSelection
+    /// 焦点状态（F4/F8）：哪张卡被悬停/键盘选中，大预览是否可见
+    @ObservedObject var focus: PanelFocus
     /// 用户在系统设置里的显示/辅助功能选项。材质与描边都由它决定，不在这里写死。
     @ObservedObject var display: SystemDisplayOptions
 
     var onActivate: (WindowInfo) -> Void
+    /// 大预览信息行的 ✕（F4）：关闭目标窗口
+    var onClose: (WindowInfo) -> Void
 
     private let cardWidth: CGFloat = 176
     private let cardImageHeight: CGFloat = 110
@@ -59,10 +63,26 @@ struct NotchRootView: View {
                 .opacity(metrics.isExpanded ? 1 : 0)
                 .scaleEffect(metrics.isExpanded ? 1 : 0.97, anchor: .top)
                 .animation(contentAnimation, value: metrics.isExpanded)
+
+            // 大预览（F4）：预览带下方长出的浮层，随面板 frame 一起长出/收回
+            if metrics.isPreviewVisible, let window = focusedWindow {
+                LargePreviewCard(
+                    window: window,
+                    image: thumbnails.images[window.id],
+                    isCapturing: thumbnails.isCapturing,
+                    display: display,
+                    onClose: { onClose(window) }
+                )
+                .padding(.top, LargePreviewLayout.gapBelowStrip)
+                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+            }
         }
+        // 内容高度 = 基础尺寸 + 大预览增高（与控制器 currentExpandedSize 同源，
+        // 同一个值由 metrics 广播，两边不会各算各的）
         .frame(width: metrics.expandedSize.width,
-               height: metrics.expandedSize.height,
+               height: metrics.expandedSize.height + metrics.previewExtraHeight,
                alignment: .top)
+        .animation(previewAnimation, value: metrics.isPreviewVisible)
         .onAppear {
             selection.update(totalCount: windowList.windows.count)
         }
@@ -71,13 +91,30 @@ struct NotchRootView: View {
         }
     }
 
+    /// 当前聚焦的窗口（可能刚被关闭，从列表里找，找不到就不画）
+    private var focusedWindow: WindowInfo? {
+        guard let id = focus.focusedWindowID else { return nil }
+        return windowList.windows.first { $0.id == id }
+    }
+
     /// 内容动画曲线与 `NotchPanelController` 的窗口 frame 动画**同档位同曲线**，
     /// 否则「窗口在缩」和「内容在淡」会各走各的，看着发飘。
     private var contentAnimation: Animation {
-        switch metrics.transition {
-        case .expand: .easeOut(duration: metrics.transition.duration)
-        case .collapseHover: .easeInOut(duration: metrics.transition.duration)
-        case .collapseAction: .easeIn(duration: metrics.transition.duration)
+        animation(for: metrics.transition)
+    }
+
+    /// 大预览显隐动画：档位由控制器在 `setPreview` 时广播，
+    /// 显示走 .expand（220ms ease-out）、隐藏走 .collapseHover（200ms ease-in-out），
+    /// 与窗口 frame 动画对齐。
+    private var previewAnimation: Animation {
+        animation(for: metrics.previewTransition)
+    }
+
+    private func animation(for transition: PanelTransition) -> Animation {
+        switch transition {
+        case .expand: .easeOut(duration: transition.duration)
+        case .collapseHover: .easeInOut(duration: transition.duration)
+        case .collapseAction: .easeIn(duration: transition.duration)
         case .immediate: .linear(duration: 0)
         }
     }
@@ -198,8 +235,15 @@ struct NotchRootView: View {
         .onHover { hovering in
             if hovering {
                 hoveredID = window.id
-            } else if hoveredID == window.id {
-                hoveredID = nil
+                // 起动预览延迟计时（280ms，F4）；换卡时 PanelFocus 会自动重启计时
+                focus.hover(window.id)
+            } else {
+                if hoveredID == window.id {
+                    hoveredID = nil
+                }
+                // 带窗口 id 校验：离开与进入事件的顺序不保证，
+                // 无条件取消会把下一张卡刚起好的计时一并取消
+                focus.hoverEnded(window.id)
             }
         }
         .help("\(window.appName) — \(window.displayTitle)")
