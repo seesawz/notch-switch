@@ -94,4 +94,36 @@ final class NotchGeometryTests: XCTestCase {
             0
         )
     }
+
+    // MARK: - 卡片行 leading 内边距（右缘露头 / R17 / ADR-044）
+
+    /// 标准展开宽 772、4 张可见、步距 188、露头 12：
+    /// padding = 772 − 4×188 − 12 = 8，第 5 张卡左缘落在 760，右缘露出 12pt
+    func testLeadingPaddingStandardExpandedWidth() {
+        XCTAssertEqual(
+            NotchGeometry.cardRowLeadingPadding(expandedWidth: 772, cardStride: 188, visibleCount: 4, peekWidth: 12),
+            8,
+            accuracy: 0.001
+        )
+    }
+
+    /// 几何不变式：padding + 可视宽 + peek = 展开宽度（第 5 张卡恰好露出 peek）
+    func testPeekFitsExactlyAtRest() {
+        let (w, s, n, peek) = (CGFloat(772), CGFloat(188), 4, CGFloat(12))
+        let padding = NotchGeometry.cardRowLeadingPadding(expandedWidth: w, cardStride: s, visibleCount: n, peekWidth: peek)
+        // 第 visibleCount+1 张卡左缘在 padding + n×stride；它到右缘的距离应恰为 peek
+        XCTAssertEqual(w - (padding + CGFloat(n) * s), peek, accuracy: 0.001)
+    }
+
+    /// 窄屏上展开宽度不足可视区时夹到 0，不凑出负边距
+    func testLeadingPaddingClampsToZeroOnNarrowScreens() {
+        XCTAssertEqual(
+            NotchGeometry.cardRowLeadingPadding(expandedWidth: 700, cardStride: 188, visibleCount: 4, peekWidth: 12),
+            0
+        )
+        XCTAssertEqual(
+            NotchGeometry.cardRowLeadingPadding(expandedWidth: 760, cardStride: 188, visibleCount: 4, peekWidth: 12),
+            0
+        )
+    }
 }

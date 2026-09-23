@@ -33,6 +33,25 @@ public enum NotchGeometry {
     public static func menubarHeight(screenFrame: CGRect, visibleFrame: CGRect) -> CGFloat {
         max(screenFrame.maxY - visibleFrame.maxY, 0)
     }
+
+    /// 卡片行 leading 内边距：右缘「露头」提示（R17 溢出发现性 / ADR-044）。
+    ///
+    /// 可视区固定 `visibleCount` 张（§6.1）。当窗口更多时，第 `visibleCount+1` 张
+    /// 要在右缘露出 `peekWidth` 的窄条提示「右边还有」。offset=0 时第
+    /// `visibleCount+1` 张卡的左缘位于 `padding + visibleCount × stride`，因此：
+    /// ```
+    /// padding = 展开宽度 − visibleCount × stride − peekWidth
+    /// ```
+    /// 标准展开宽 772：`772 − 4×188 − 12 = 8`。
+    /// 窄外接屏上展开宽度不足时夹到 0，让裁切自然发生（不凑出负边距）。
+    public static func cardRowLeadingPadding(
+        expandedWidth: CGFloat,
+        cardStride: CGFloat,
+        visibleCount: Int,
+        peekWidth: CGFloat
+    ) -> CGFloat {
+        max(0, expandedWidth - CGFloat(visibleCount) * cardStride - peekWidth)
+    }
 }
 
 public extension NSScreen {

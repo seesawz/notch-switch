@@ -4,6 +4,8 @@ import SwiftUI
 /// 刘海面板的内容：横向窗口预览条（Kimi 风格 + Liquid Glass）。
 ///
 /// 可视区固定 4 张（PLAN.md §6.1），窗口多于 4 个时直接滚轮逐张滚动（§6.5）。
+/// 溢出发现性（R17 / ADR-044）：卡片行 leading 内边距由几何函数反推，
+/// 收起位（offset=0）保证第 5 张卡在右缘露出窄条，提示「可滚动」。
 /// 材质统一走 `kimiGlass`（macOS 26+ Liquid Glass，低版本回退毛玻璃，见 KimiTheme）。
 struct NotchRootView: View {
 
@@ -20,7 +22,13 @@ struct NotchRootView: View {
     private let cardWidth: CGFloat = 176
     private let cardImageHeight: CGFloat = 110
     private let cardSpacing: CGFloat = 12
+    /// 卡片步距 = 宽 + 间距（与 `PanelSelection.cardStride` 同源，改动需同步）
+    private var cardStride: CGFloat { cardWidth + cardSpacing }
     private let horizontalPadding: CGFloat = 16
+    /// 右缘「露头」宽度（R17 / ADR-044）：窗口多于可视数时，
+    /// 第 5 张卡在右缘露出这条窄边，提示「右边还有、可滚动」。
+    /// 实际 leading 内边距由 `NotchGeometry.cardRowLeadingPadding` 反推。
+    private let peekWidth: CGFloat = 12
     /// = 卡片 132 + 上下内边距 16（已移除 footer，见 §6.1）
     private let contentHeight: CGFloat = 148
 
@@ -148,13 +156,23 @@ struct NotchRootView: View {
     ///
     /// 为什么不「换一批卡片」：那样每次切换都是内容瞬变，无论帧率多高看起来都是「跳」。
     /// 排成一条 + 位移，配合 `PanelSelection` 的逐帧跟随，才有原生滚动的手感。
+    ///
+    /// 内边距是**非对称**的（ADR-044）：leading 由几何函数反推，保证 offset=0 时
+    /// 第 5 张卡在右缘露出 `peekWidth` 的窄条；trailing 保持常规 16。
+    /// 副作用即特性：滚到尽头（maxOffset）时右缘无露头，天然表示「到底了」。
     private var cardRow: some View {
         HStack(spacing: cardSpacing) {
             ForEach(windowList.windows) { window in
                 card(for: window)
             }
         }
-        .padding(.horizontal, horizontalPadding)
+        .padding(.leading, NotchGeometry.cardRowLeadingPadding(
+            expandedWidth: metrics.expandedSize.width,
+            cardStride: cardStride,
+            visibleCount: 4,
+            peekWidth: peekWidth
+        ))
+        .padding(.trailing, horizontalPadding)
         .offset(x: -selection.offset)
         .frame(width: metrics.expandedSize.width, alignment: .leading)
         // 不在这里 .clipped()：本视图边界正好贴着卡片，悬停放大（1.03）外溢的 ~2pt
