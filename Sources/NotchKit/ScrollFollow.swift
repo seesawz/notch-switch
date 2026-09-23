@@ -60,19 +60,6 @@ public struct ScrollFollow {
         return Int((offset / stride).rounded())
     }
 
-    /// 键盘导航（F8）：把 `target` 夹进「第 `index` 张卡完整可见」的偏移区间。
-    /// 已可见则原样返回（不产生多余滚动）；越界则贴到最近的边界。
-    /// 区间：`upper = index×stride`（卡左缘不越出可视区左侧），
-    /// `lower = (index+1−visibleCount)×stride`（卡右缘不越出右侧）。
-    /// 基于 `target` 而非 `offset` 计算：连续按键时渲染还没追上，
-    /// 用 offset 会拿旧位置做判断，快速连按会来回抖。
-    public func targetToShow(index: Int, stride: CGFloat, visibleCount: Int, maxOffset: CGFloat) -> CGFloat {
-        guard stride > 0, visibleCount > 0, index >= 0 else { return target }
-        let lower = CGFloat(index + 1 - visibleCount) * stride
-        let upper = CGFloat(index) * stride
-        return min(max(0, min(max(target, lower), upper)), maxOffset)
-    }
-
     public mutating func reset() {
         offset = 0
         target = 0

@@ -22,14 +22,6 @@ public final class NotchMetrics: ObservableObject {
     /// 本次变化使用的动画档位，供 SwiftUI 侧对齐曲线
     @Published public private(set) var transition: PanelTransition = .expand
 
-    /// 大预览是否可见（F4）。与 isExpanded 分开：预览的显隐不该触发预览带重播淡入。
-    @Published public private(set) var isPreviewVisible: Bool = false
-    /// 大预览使面板内容增高的总量（间隙 + 卡高，`LargePreviewLayout.panelExtraHeight`）。
-    /// 视图用它撑高内容 frame，与控制器的窗口 frame 同源。
-    @Published public private(set) var previewExtraHeight: CGFloat = 0
-    /// 预览显隐动画档位，与窗口 frame 动画对齐（同 ADR-027「两边同档位同曲线」的道理）
-    @Published public private(set) var previewTransition: PanelTransition = .expand
-
     public init() {}
 
     func update(topInset: CGFloat, expandedSize: CGSize, hasNotch: Bool) {
@@ -43,12 +35,5 @@ public final class NotchMetrics: ObservableObject {
     func setExpanded(_ expanded: Bool, transition: PanelTransition) {
         if self.transition != transition { self.transition = transition }
         if self.isExpanded != expanded { self.isExpanded = expanded }
-    }
-
-    /// 大预览显隐（同上：先档位后状态）。值不变时不赋值，避免无谓的广播。
-    func setPreview(visible: Bool, extraHeight: CGFloat, transition: PanelTransition) {
-        if self.previewTransition != transition { self.previewTransition = transition }
-        if self.isPreviewVisible != visible { self.isPreviewVisible = visible }
-        if self.previewExtraHeight != extraHeight { self.previewExtraHeight = extraHeight }
     }
 }

@@ -15,8 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let windowList = WindowListModel()
     private let thumbnails = ThumbnailStore()
     private let selection = PanelSelection()
-    /// 焦点状态（F4/F8）：悬停/键盘选中哪张卡、大预览是否可见
-    private let focus = PanelFocus()
     /// 用户在系统设置里的显示 / 辅助功能偏好。材质、描边、动画都必须由它决定。
     private let display = SystemDisplayOptions()
     private var panelController: NotchPanelController?
@@ -62,10 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     windowList: windowList,
                     thumbnails: thumbnails,
                     selection: selection,
-                    focus: focus,
                     display: display,
-                    onActivate: { [weak self] window in self?.activate(window) },
-                    onClose: { [weak self] window in self?.closeWindow(window) }
+                    onActivate: { [weak self] window in self?.activate(window) }
                 )
             ),
             metrics: metrics
@@ -95,17 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.selection.update(totalCount: total)
             // 卡片不超过一屏时没有可滚动内容，不消费事件，避免白白吞掉用户的滚动
             guard self.selection.maxOffset > 0 else { return false }
-            // 滚动抑制悬停大预览（§6.5）：已显示的收走，未落地的计时取消
-            self.focus.cancelHover()
-            self.focus.hidePreview()
             self.selection.scroll(by: contentOffset, totalCount: total)
             return true
-        }
-
-        // 键盘基础导航（F8）：←→ 移动选中、Return 打开、Esc 逐级收起。
-        // 只在面板展开且持 key 时才会被控制器调用，不影响前台 App 的键盘输入。
-        controller.onKeyboard = { [weak self] command in
-            self?.handleKeyboard(command)
         }
 
         // 展开时刷新列表与缩略图；收起时复位可见区
@@ -122,30 +109,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // 缩略图统一在面板不可见时补（见 .collapsed 分支与启动时）。
             case .collapsed:
                 self.selection.reset()
-                self.focus.reset()
                 // 收起后解除冻结并重排一次，下次展开就是最新的最近使用顺序
                 self.windowList.isOrderFrozen = false
                 self.windowList.scheduleRefresh()
                 self.refreshThumbnailsWhileHidden()
             }
         }
-
-        // 大预览同步（F4）：焦点/可见性变化 → 由窗口宽高比算出增高，交给控制器。
-        // 控制器对相同值做了去重，这里的重复回调不会触发无谓的 frame 动画。
-        focus.$isPreviewVisible
-            .combineLatest(focus.$focusedWindowID)
-            .sink { [weak self] _ in self?.syncPreview() }
-            .store(in: &subscriptions)
-
-        // 聚焦的窗口被关闭（✕ 或用户自己关的）→ 复位焦点，预览随之收回
-        windowList.$windows
-            .sink { [weak self] windows in
-                guard let self, let id = self.focus.focusedWindowID else { return }
-                if !windows.contains(where: { $0.id == id }) {
-                    self.focus.reset()
-                }
-            }
-            .store(in: &subscriptions)
 
         controller.start()
 
@@ -201,67 +170,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + activationHighlightDuration) { [weak self] in
             self?.selection.clearActivating(window.id)
         }
-    }
-
-    /// 大预览信息行的 ✕（F4）：关闭目标窗口。
-    /// 关闭成功与否都交给列表刷新收尾：成功 → 窗口从列表消失 → 焦点自动复位；
-    /// 失败（无关闭按钮）→ 列表不变，预览保持打开。
-    private func closeWindow(_ window: WindowInfo) {
-        WindowActivator.close(window)
-        windowList.scheduleRefresh()
-    }
-
-    // MARK: - 键盘导航（F8 基础）
-
-    private func handleKeyboard(_ command: NotchPanelController.KeyboardCommand) {
-        switch command {
-        case .move(let delta):
-            let windows = windowList.windows
-            guard !windows.isEmpty else { return }
-            // 已有焦点从它继续；没有则从当前可视区第一张开始（比如刚用滚轮翻过页）
-            let current: Int
-            if let id = focus.focusedWindowID,
-               let index = windows.firstIndex(where: { $0.id == id }) {
-                current = index
-            } else {
-                current = selection.firstVisibleIndex
-            }
-            let next = min(max(0, current + delta), windows.count - 1)
-            selection.ensureVisible(index: next, totalCount: windows.count)
-            focus.select(windows[next].id)
-        case .activate:
-            guard let id = focus.focusedWindowID,
-                  let window = windowList.windows.first(where: { $0.id == id }) else { return }
-            activate(window)
-        case .escape:
-            // 逐级收起：第一档隐大预览，第二档收面板
-            if focus.isPreviewVisible {
-                focus.hidePreview()
-            } else {
-                panelController?.collapse(style: .collapseAction)
-            }
-        }
-    }
-
-    /// 焦点/可见性变化 → 算出面板增高交给控制器（F4）。
-    /// 高度由窗口 frame 的宽高比决定（大图完整放进 640×400），
-    /// 不依赖缩略图是否已抓到——占位图保持同样比例，面板高度不跳动。
-    private func syncPreview() {
-        guard focus.isPreviewVisible,
-              let id = focus.focusedWindowID,
-              let window = windowList.windows.first(where: { $0.id == id }) else {
-            panelController?.setPreview(visible: false, extraHeight: 0)
-            return
-        }
-        let aspect = window.frame.height > 0
-            ? window.frame.width / window.frame.height
-            : LargePreviewLayout.defaultAspect
-        let extra = LargePreviewLayout.panelExtraHeight(
-            cardHeight: LargePreviewLayout.cardSize(
-                image: LargePreviewLayout.displaySize(aspect: aspect)
-            ).height
-        )
-        panelController?.setPreview(visible: true, extraHeight: extra)
     }
 
     // MARK: - 权限引导
