@@ -11,7 +11,6 @@ public final class WindowListModel: ObservableObject {
 
     @Published public private(set) var windows: [WindowInfo] = []
     @Published public private(set) var diagnostics: String = ""
-    @Published public private(set) var lastRefresh: Date?
 
     private var mru = MRUOrder()
     private let observerPool = AXObserverPool()
@@ -82,8 +81,13 @@ public final class WindowListModel: ObservableObject {
             windows = mru.sorted(enumerated, id: \.id)
         }
         observerPool.sync(with: Set(enumerated.map(\.pid)))
-        lastRefresh = Date()
-        diagnostics = "\(enumerated.count) 个窗口 / \(Set(enumerated.map(\.pid)).count) 个应用 / 订阅 \(observerPool.observedProcessCount) 个应用"
+        // 值没变就不广播：diagnostics 在每次 focus 变化时大多原样，
+        // 无条件赋值会让 @Published 白白触发一轮 SwiftUI 重算。
+        // （windows 不能这样比：WindowInfo 的 == 只比 id，值变了也判等。）
+        let newDiagnostics = "\(enumerated.count) 个窗口 / \(Set(enumerated.map(\.pid)).count) 个应用 / 订阅 \(observerPool.observedProcessCount) 个应用"
+        if diagnostics != newDiagnostics {
+            diagnostics = newDiagnostics
+        }
 
         // 首次枚举用 notice 级，保证能被 log show 查到
         // （「一个窗口都没枚举到」是最常见的故障，必须有日志可查）

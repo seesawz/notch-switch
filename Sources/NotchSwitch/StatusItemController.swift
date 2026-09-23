@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import NotchKit
 
 /// 菜单栏常驻入口（Agent App 的唯一可见入口）。
@@ -25,7 +26,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let screenRecordingItem = NSMenuItem(title: "屏幕录制权限", action: nil, keyEquivalent: "")
     private let locationItem = NSMenuItem(title: "运行位置", action: nil, keyEquivalent: "")
     private let hoverWithoutNotchItem = NSMenuItem(title: "无刘海屏幕顶部触发", action: #selector(toggleHoverWithoutNotch), keyEquivalent: "")
-    private var appearanceTimer: Timer?
+    private var appearanceSubscription: AnyCancellable?
 
     init(permissions: PermissionsModel, settings: AppSettings) {
         self.permissions = permissions
@@ -37,12 +38,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem.menu = menu
         updateAppearance()
 
-        // 权限没拿齐时用警告图标，让用户一眼看出「这东西还没法用」
-        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateAppearance() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        appearanceTimer = timer
+        // 权限没拿齐时用警告图标，让用户一眼看出「这东西还没法用」。
+        // 订阅 PermissionsModel 的变更而不是自己再开一个 2s 轮询——
+        // 轮询已经有（PermissionsModel 内部），这里只需要跟着状态变。
+        // async 跳一拍：objectWillChange 是 willSet 语义，同步读还是旧值。
+        appearanceSubscription = permissions.objectWillChange
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.updateAppearance() }
+            }
     }
 
     func setCallbacks(_ callbacks: Callbacks) {

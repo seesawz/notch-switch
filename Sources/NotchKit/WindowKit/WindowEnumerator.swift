@@ -17,12 +17,23 @@ public enum WindowEnumerator {
         let normalSnapshots = snapshots.filter(\.isNormalLayer)
 
         var result: [WindowInfo] = []
+        // 同应用多窗口共用一张图标：按 pid 缓存在本次枚举内，
+        // 别给每个窗口都调一次 NSRunningApplication.icon（它每次都会重新渲染）
+        var iconCache: [pid_t: NSImage] = [:]
 
         for app in NSWorkspace.shared.runningApplications {
             // 只关心「常规」应用：排除菜单栏程序、后台代理
             guard app.activationPolicy == .regular else { continue }
             let pid = app.processIdentifier
             guard pid != myPID else { continue }
+
+            let icon: NSImage?
+            if let cached = iconCache[pid] {
+                icon = cached
+            } else {
+                icon = app.icon
+                iconCache[pid] = icon
+            }
 
             let axApp = AXUIElementCreateApplication(pid)
             guard let axWindows = axApp.elements(kAXWindowsAttribute as String) else { continue }
@@ -32,6 +43,7 @@ public enum WindowEnumerator {
                     axWindow: axWindow,
                     app: app,
                     pid: pid,
+                    icon: icon,
                     snapshots: normalSnapshots
                 ) else { continue }
                 result.append(info)
@@ -51,6 +63,7 @@ public enum WindowEnumerator {
         axWindow: AXUIElement,
         app: NSRunningApplication,
         pid: pid_t,
+        icon: NSImage?,
         snapshots: [CGWindowSnapshot]
     ) -> WindowInfo? {
         // 只保留标准窗口，排除浮动面板、弹出层等。
@@ -79,7 +92,7 @@ public enum WindowEnumerator {
             title: axWindow.string(kAXTitleAttribute as String) ?? "",
             isMinimized: axWindow.bool(kAXMinimizedAttribute as String) ?? false,
             frame: frame,
-            appIcon: app.icon
+            appIcon: icon
         )
     }
 
